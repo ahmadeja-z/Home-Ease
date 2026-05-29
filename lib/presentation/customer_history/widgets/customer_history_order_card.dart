@@ -17,149 +17,295 @@ class CustomerHistoryOrderCard extends StatelessWidget {
 
   String _formatDate(DateTime? date) {
     if (date == null) return '—';
-    return '${date.day}/${date.month}/${date.year}';
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${date.day} ${months[date.month - 1]}';
   }
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
     final worker = order.workerInfo;
     final displayDate = order.completedAt ?? order.createdAt;
 
     return Material(
-      color: theme.cardColor,
-      elevation: 0,
-      borderRadius: BorderRadius.circular(18),
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(20),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: Container(
-          padding: const EdgeInsets.all(16),
+        borderRadius: BorderRadius.circular(20),
+        splashColor: cs.primary.withValues(alpha: 0.06),
+        highlightColor: cs.primary.withValues(alpha: 0.03),
+        child: Ink(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
+            color: Theme.of(context).colorScheme.onPrimary,
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: theme.colorScheme.outline.withValues(alpha: 0.35),
+              color: cs.outlineVariant.withValues(alpha: 0.5),
+              width: 1,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  if (worker != null)
-                    AppCacheImage(
-                      imageUrl: worker.profileImage ?? '',
-                      width: 44,
-                      height: 44,
-                      round: 22,
-                      boxFit: BoxFit.cover,
-                    )
-                  else
-                    CircleAvatar(
-                      radius: 22,
-                      backgroundColor:
-                          theme.colorScheme.primary.withValues(alpha: 0.1),
-                      child: Icon(
-                        Icons.person_outline,
-                        color: theme.colorScheme.primary,
+              // ── Top section ───────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Worker avatar
+                    _WorkerAvatar(worker: worker, cs: cs),
+                    const SizedBox(width: 14),
+
+                    // Title + ID + worker name
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            order.categoryName ?? 'Service request',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: cs.onSurface,
+                              letterSpacing: -0.2,
+                              height: 1.3,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            '#${order.shortRequestId}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: cs.onSurface.withValues(alpha: 0.4),
+                              fontSize: 11,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                          if (worker != null) ...[
+                            const SizedBox(height: 5),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.person_outline_rounded,
+                                  size: 12,
+                                  color: cs.onSurface.withValues(alpha: 0.4),
+                                ),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    worker.name,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: cs.onSurface.withValues(alpha: 0.7),
+                                      fontSize: 12,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    const SizedBox(width: 10),
+
+                    // Amount + rating
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          order.categoryName ?? 'Service request',
+                          '${CurrencyIcon.currencyIcon}${order.displayAmount.toStringAsFixed(0)}',
                           style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
+                            fontWeight: FontWeight.w700,
+                            color: cs.primary,
+                            fontSize: 16,
+                          ),
+                        ),
+                        if (order.hasReview) ...[
+                          const SizedBox(height: 4),
+                          _StarRating(rating: order.rating!, cs: cs),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // ── Divider ───────────────────────────────────────────────
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: cs.outlineVariant.withValues(alpha: 0.3),
+                indent: 16,
+                endIndent: 16,
+              ),
+
+              // ── Address row ───────────────────────────────────────────
+              if (order.customerAddress != null &&
+                  order.customerAddress!.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Icon(
+                          Icons.location_on_outlined,
+                          size: 13,
+                          color: cs.onSurface.withValues(alpha: 0.4),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          order.customerAddress!,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontSize: 12,
+                            color: cs.onSurface.withValues(alpha: 0.55),
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        Text(
-                          '#${order.shortRequestId}',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                        if (worker != null)
-                          Text(
-                            worker.name,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              fontWeight: FontWeight.w500,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                      ],
-                    ),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        '${CurrencyIcon.currencyIcon}${order.displayAmount.toStringAsFixed(2)}',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: theme.colorScheme.primary,
-                        ),
                       ),
-                      if (order.hasReview)
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.star, size: 14, color: Colors.amber),
-                            Text(
-                              order.rating!.toStringAsFixed(1),
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
                     ],
                   ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              if (order.customerAddress != null &&
-                  order.customerAddress!.isNotEmpty)
-                Row(
+                ),
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: cs.outlineVariant.withValues(alpha: 0.3),
+                  indent: 16,
+                  endIndent: 16,
+                ),
+              ],
+
+              // ── Footer ────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 12, 12),
+                child: Row(
                   children: [
-                    Icon(Icons.location_on_outlined,
-                        size: 14, color: theme.hintColor),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        order.customerAddress!,
-                        style: theme.textTheme.bodySmall,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                    CustomerHistoryStatusChip(status: order.status),
+                    const SizedBox(width: 6),
+                    CustomerHistoryPaymentChip(
+                        paymentStatus: order.paymentStatus),
+                    const Spacer(),
+                    Text(
+                      _formatDate(displayDate),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurface.withValues(alpha: 0.4),
+                        fontSize: 11,
                       ),
+                    ),
+                    const SizedBox(width: 2),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: cs.onSurface.withValues(alpha: 0.3),
                     ),
                   ],
                 ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  CustomerHistoryStatusChip(status: order.status),
-                  const SizedBox(width: 6),
-                  CustomerHistoryPaymentChip(paymentStatus: order.paymentStatus),
-                  const Spacer(),
-                  Text(
-                    _formatDate(displayDate),
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  const Icon(Icons.chevron_right, size: 20),
-                ],
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── Worker Avatar ──────────────────────────────────────────────────────────────
+
+class _WorkerAvatar extends StatelessWidget {
+  const _WorkerAvatar({required this.worker, required this.cs});
+
+  final dynamic worker;
+  final ColorScheme cs;
+
+  @override
+  Widget build(BuildContext context) {
+    if (worker != null && (worker.profileImage ?? '').isNotEmpty) {
+      return AppCacheImage(
+        imageUrl: worker.profileImage!,
+        width: 52,
+        height: 52,
+        round: 26,
+        boxFit: BoxFit.cover,
+      );
+    }
+
+    // Initials fallback
+    final initials = worker != null && (worker.name as String).isNotEmpty
+        ? (worker.name as String)
+            .trim()
+            .split(' ')
+            .take(2)
+            .map((w) => w[0].toUpperCase())
+            .join()
+        : '?';
+
+    return Container(
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(
+        color: cs.primary.withValues(alpha: 0.1),
+        shape: BoxShape.circle,
+      ),
+      child: Center(
+        child: Text(
+          initials,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            color: cs.primary,
+            letterSpacing: 0.5,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Star Rating ────────────────────────────────────────────────────────────────
+
+class _StarRating extends StatelessWidget {
+  const _StarRating({required this.rating, required this.cs});
+
+  final double rating;
+  final ColorScheme cs;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: cs.tertiaryContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.star_rounded, size: 12, color: cs.onTertiaryContainer),
+          const SizedBox(width: 3),
+          Text(
+            rating.toStringAsFixed(1),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: cs.onTertiaryContainer,
+            ),
+          ),
+        ],
       ),
     );
   }

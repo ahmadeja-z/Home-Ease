@@ -13,6 +13,9 @@ class CustomerHistoryFilters extends Equatable {
   final String? paymentFilter;
   final DateTime? dateFrom;
   final DateTime? dateTo;
+  final String? categoryId;
+  final double? minPrice;
+  final double? maxPrice;
   final CustomerHistorySort sort;
 
   const CustomerHistoryFilters({
@@ -20,6 +23,9 @@ class CustomerHistoryFilters extends Equatable {
     this.paymentFilter,
     this.dateFrom,
     this.dateTo,
+    this.categoryId,
+    this.minPrice,
+    this.maxPrice,
     this.sort = CustomerHistorySort.newest,
   });
 
@@ -28,10 +34,15 @@ class CustomerHistoryFilters extends Equatable {
     String? paymentFilter,
     DateTime? dateFrom,
     DateTime? dateTo,
+    String? categoryId,
+    double? minPrice,
+    double? maxPrice,
     CustomerHistorySort? sort,
     bool clearStatus = false,
     bool clearPayment = false,
     bool clearDates = false,
+    bool clearCategory = false,
+    bool clearPrice = false,
   }) {
     return CustomerHistoryFilters(
       statusFilter: clearStatus ? null : (statusFilter ?? this.statusFilter),
@@ -39,19 +50,36 @@ class CustomerHistoryFilters extends Equatable {
           clearPayment ? null : (paymentFilter ?? this.paymentFilter),
       dateFrom: clearDates ? null : (dateFrom ?? this.dateFrom),
       dateTo: clearDates ? null : (dateTo ?? this.dateTo),
+      categoryId: clearCategory ? null : (categoryId ?? this.categoryId),
+      minPrice: clearPrice ? null : (minPrice ?? this.minPrice),
+      maxPrice: clearPrice ? null : (maxPrice ?? this.maxPrice),
       sort: sort ?? this.sort,
     );
   }
 
-  bool get hasActiveFilters =>
-      statusFilter != null ||
-      paymentFilter != null ||
-      dateFrom != null ||
-      dateTo != null;
+  bool get hasActiveFilters => activeFilterCount > 0;
+
+  int get activeFilterCount {
+    var count = 0;
+    if (statusFilter != null) count++;
+    if (paymentFilter != null) count++;
+    if (dateFrom != null || dateTo != null) count++;
+    if (categoryId != null) count++;
+    if (minPrice != null || maxPrice != null) count++;
+    return count;
+  }
 
   @override
-  List<Object?> get props =>
-      [statusFilter, paymentFilter, dateFrom, dateTo, sort];
+  List<Object?> get props => [
+        statusFilter,
+        paymentFilter,
+        dateFrom,
+        dateTo,
+        categoryId,
+        minPrice,
+        maxPrice,
+        sort,
+      ];
 }
 
 class CustomerHistorySummary extends Equatable {

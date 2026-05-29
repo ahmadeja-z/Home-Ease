@@ -23,11 +23,15 @@ class CustomerHistoryState extends Equatable {
   final CustomerHistoryTab selectedTab;
   final List<ServiceRequestModel> scheduledRequests;
   final List<ServiceRequestModel> instantRequests;
+  final List<ServiceRequestModel> filteredScheduledRequests;
+  final List<ServiceRequestModel> filteredInstantRequests;
   final ServiceRequestModel? selectedScheduledRequest;
   final ServiceRequestModel? selectedOrder;
   final CustomerHistorySummary summary;
-  final CustomerHistoryFilters filters;
-  final String searchQuery;
+  final CustomerHistoryFilters scheduledFilters;
+  final CustomerHistoryFilters instantFilters;
+  final String scheduledSearchQuery;
+  final String instantSearchQuery;
   final bool scheduledHasMore;
   final bool instantHasMore;
   final bool isLoadingMore;
@@ -49,11 +53,15 @@ class CustomerHistoryState extends Equatable {
     this.selectedTab = CustomerHistoryTab.scheduled,
     this.scheduledRequests = const [],
     this.instantRequests = const [],
+    this.filteredScheduledRequests = const [],
+    this.filteredInstantRequests = const [],
     this.selectedScheduledRequest,
     this.selectedOrder,
     this.summary = const CustomerHistorySummary(),
-    this.filters = const CustomerHistoryFilters(),
-    this.searchQuery = '',
+    this.scheduledFilters = const CustomerHistoryFilters(),
+    this.instantFilters = const CustomerHistoryFilters(),
+    this.scheduledSearchQuery = '',
+    this.instantSearchQuery = '',
     this.scheduledHasMore = true,
     this.instantHasMore = true,
     this.isLoadingMore = false,
@@ -69,25 +77,54 @@ class CustomerHistoryState extends Equatable {
     this.scheduledStatusAlert,
   });
 
+  int get selectedTabIndex =>
+      selectedTab == CustomerHistoryTab.scheduled ? 0 : 1;
+
+  String get currentSearchQuery => selectedTab == CustomerHistoryTab.scheduled
+      ? scheduledSearchQuery
+      : instantSearchQuery;
+
+  CustomerHistoryFilters get currentFilters =>
+      selectedTab == CustomerHistoryTab.scheduled
+          ? scheduledFilters
+          : instantFilters;
+
+  int get currentActiveFilterCount => currentFilters.activeFilterCount;
+
+  bool get hasActiveFiltersOnCurrentTab => currentFilters.hasActiveFilters;
+
   /// Instant tab list (alias for existing instant UI).
-  List<ServiceRequestModel> get historyOrders => instantRequests;
+  List<ServiceRequestModel> get historyOrders => filteredInstantRequests;
 
   bool get hasMore => instantHasMore;
 
   int get currentOffset => instantOffset;
+
+  /// @deprecated Use [scheduledFilters] / [instantFilters].
+  CustomerHistoryFilters get filters => currentFilters;
+
+  /// @deprecated Use [currentSearchQuery].
+  String get searchQuery => currentSearchQuery;
+
+  bool get hasActiveSearchOrFilters =>
+      currentSearchQuery.trim().isNotEmpty || hasActiveFiltersOnCurrentTab;
 
   CustomerHistoryState copyWith({
     CustomerHistoryStatus? status,
     CustomerHistoryTab? selectedTab,
     List<ServiceRequestModel>? scheduledRequests,
     List<ServiceRequestModel>? instantRequests,
+    List<ServiceRequestModel>? filteredScheduledRequests,
+    List<ServiceRequestModel>? filteredInstantRequests,
     ServiceRequestModel? selectedScheduledRequest,
     bool clearSelectedScheduled = false,
     ServiceRequestModel? selectedOrder,
     bool clearSelectedOrder = false,
     CustomerHistorySummary? summary,
-    CustomerHistoryFilters? filters,
-    String? searchQuery,
+    CustomerHistoryFilters? scheduledFilters,
+    CustomerHistoryFilters? instantFilters,
+    String? scheduledSearchQuery,
+    String? instantSearchQuery,
     bool? scheduledHasMore,
     bool? instantHasMore,
     bool? isLoadingMore,
@@ -105,20 +142,38 @@ class CustomerHistoryState extends Equatable {
     bool? showWorkerNotStartedHint,
     String? scheduledStatusAlert,
     bool clearScheduledAlert = false,
+    bool clearScheduledFilters = false,
+    bool clearInstantFilters = false,
+    bool clearScheduledSearch = false,
+    bool clearInstantSearch = false,
   }) {
     return CustomerHistoryState(
       status: status ?? this.status,
       selectedTab: selectedTab ?? this.selectedTab,
       scheduledRequests: scheduledRequests ?? this.scheduledRequests,
       instantRequests: instantRequests ?? this.instantRequests,
+      filteredScheduledRequests:
+          filteredScheduledRequests ?? this.filteredScheduledRequests,
+      filteredInstantRequests:
+          filteredInstantRequests ?? this.filteredInstantRequests,
       selectedScheduledRequest: clearSelectedScheduled
           ? null
           : (selectedScheduledRequest ?? this.selectedScheduledRequest),
       selectedOrder:
           clearSelectedOrder ? null : (selectedOrder ?? this.selectedOrder),
       summary: summary ?? this.summary,
-      filters: filters ?? this.filters,
-      searchQuery: searchQuery ?? this.searchQuery,
+      scheduledFilters: clearScheduledFilters
+          ? const CustomerHistoryFilters()
+          : (scheduledFilters ?? this.scheduledFilters),
+      instantFilters: clearInstantFilters
+          ? const CustomerHistoryFilters()
+          : (instantFilters ?? this.instantFilters),
+      scheduledSearchQuery: clearScheduledSearch
+          ? ''
+          : (scheduledSearchQuery ?? this.scheduledSearchQuery),
+      instantSearchQuery: clearInstantSearch
+          ? ''
+          : (instantSearchQuery ?? this.instantSearchQuery),
       scheduledHasMore: scheduledHasMore ?? this.scheduledHasMore,
       instantHasMore: instantHasMore ?? this.instantHasMore,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
@@ -133,8 +188,9 @@ class CustomerHistoryState extends Equatable {
       watchingScheduledRequestId: clearWatching
           ? null
           : (watchingScheduledRequestId ?? this.watchingScheduledRequestId),
-      countdownRemaining:
-          clearCountdown ? null : (countdownRemaining ?? this.countdownRemaining),
+      countdownRemaining: clearCountdown
+          ? null
+          : (countdownRemaining ?? this.countdownRemaining),
       showWorkerNotStartedHint:
           showWorkerNotStartedHint ?? this.showWorkerNotStartedHint,
       scheduledStatusAlert: clearScheduledAlert
@@ -160,11 +216,15 @@ class CustomerHistoryState extends Equatable {
         selectedTab,
         scheduledRequests,
         instantRequests,
+        filteredScheduledRequests,
+        filteredInstantRequests,
         selectedScheduledRequest,
         selectedOrder,
         summary,
-        filters,
-        searchQuery,
+        scheduledFilters,
+        instantFilters,
+        scheduledSearchQuery,
+        instantSearchQuery,
         scheduledHasMore,
         instantHasMore,
         isLoadingMore,

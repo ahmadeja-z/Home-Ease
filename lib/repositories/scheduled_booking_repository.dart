@@ -15,7 +15,7 @@ class ScheduledBookingRepository {
   ScheduledBookingRepository({SupabaseClient? client})
       : supabase = client ?? Supabase.instance.client;
 
-  static const String _imagesBucket = 'request-images';
+  static const String _imagesBucket = 'scheduled-request-images';
 
   static const List<String> scheduledBookingStatuses = [
     'pending_admin_approval',
@@ -63,9 +63,25 @@ class ScheduledBookingRepository {
     final urls = <String>[];
     for (var i = 0; i < files.length; i++) {
       try {
-        final bytes = await files[i].readAsBytes();
+        final file = files[i];
         final path =
             '$customerId/scheduled_${DateTime.now().millisecondsSinceEpoch}_$i.jpg';
+        final exists = await file.exists();
+        final size = exists ? await file.length() : 0;
+
+        if (kDebugMode) {
+          print(
+            'ScheduledBookingRepository upload — '
+            'bucket: $_imagesBucket, path: $path, '
+            'exists: $exists, size: $size bytes',
+          );
+        }
+
+        if (!exists || size == 0) {
+          throw Exception('Image file ${i + 1} is missing or empty.');
+        }
+
+        final bytes = await file.readAsBytes();
 
         await supabase.storage.from(_imagesBucket).uploadBinary(
               path,
@@ -158,6 +174,21 @@ class ScheduledBookingRepository {
       enriched['service_title'] = service.title;
       enriched['service_main_image'] = service.mainImage;
 
+      final requestId = enriched['id'] as String;
+      final categoryName =
+          service.categoryTitle?.trim().isNotEmpty == true
+              ? service.categoryTitle!.trim()
+              : (service.title.trim().isNotEmpty
+                  ? service.title.trim()
+                  : 'Service');
+      final customerName = await _fetchProfileName(userId);
+
+      await notifyAdminsForScheduledRequest(
+        requestId: requestId,
+        customerName: customerName,
+        categoryName: categoryName,
+      );
+
       return await _mapSingleWithWorker(enriched);
     } on PostgrestException catch (e) {
       if (kDebugMode) {
@@ -170,6 +201,83 @@ class ScheduledBookingRepository {
       }
       throw Exception(e.message);
     }
+  }
+
+  /// Inserts in-app notifications for every active admin after a scheduled request
+  /// is created. Failures are logged and never propagate to the caller.
+  Future<void> notifyAdminsForScheduledRequest({
+    required String requestId,
+    required String customerName,
+    required String categoryName,
+  }) async {
+    try {
+      final admins = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('role', 'admin')
+          .eq('is_active', true);
+
+      final adminList = (admins as List).cast<Map<String, dynamic>>();
+      if (adminList.isEmpty) {
+        if (kDebugMode) {
+          print(
+            'ScheduledBookingRepository notifyAdminsForScheduledRequest: '
+            'no active admins found for request $requestId',
+          );
+        }
+        return;
+      }
+
+      final now = DateTime.now().toUtc().toIso8601String();
+      final body =
+          'New scheduled request from $customerName for $categoryName.';
+
+      final rows = adminList.map((admin) {
+        return {
+          'user_id': admin['id'],
+          'title': 'New Scheduled Job Request',
+          'body': body,
+          'type': 'scheduled_request_created',
+          'is_read': false,
+          'created_at': now,
+        };
+      }).toList();
+
+      await supabase.from('notifications').insert(rows);
+
+      if (kDebugMode) {
+        print(
+          'ScheduledBookingRepository notifyAdminsForScheduledRequest: '
+          'created ${rows.length} notification(s) for request $requestId',
+        );
+      }
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        print(
+          'ScheduledBookingRepository notifyAdminsForScheduledRequest: '
+          'failed for request $requestId — $e',
+        );
+        print(stackTrace);
+      }
+    }
+  }
+
+  Future<String> _fetchProfileName(String userId) async {
+    try {
+      final profile = await supabase
+          .from('profiles')
+          .select('name')
+          .eq('id', userId)
+          .maybeSingle();
+
+      final name = profile?['name'] as String?;
+      if (name != null && name.trim().isNotEmpty) {
+        return name.trim();
+      }
+    } catch (_) {
+      // Fall back to generic label below.
+    }
+    return 'Customer';
   }
 
   Future<ServiceRequestModel> fetchScheduledBookingDetails(

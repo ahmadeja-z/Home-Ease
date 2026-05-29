@@ -3,12 +3,11 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:homeease/presentation/customer_history/bloc/customer_history_bloc.dart';
 import 'package:homeease/presentation/customer_history/bloc/customer_history_event.dart';
 import 'package:homeease/presentation/customer_history/bloc/customer_history_state.dart';
-import 'package:homeease/presentation/customer_history/models/customer_history_model.dart';
 import 'package:homeease/presentation/customer_history/screens/customer_history_details_screen.dart';
 import 'package:homeease/presentation/customer_history/widgets/customer_history_empty_state.dart';
 import 'package:homeease/presentation/customer_history/widgets/customer_history_order_card.dart';
 
-/// Instant orders tab — reuses the original history list UI (search, filters, pagination).
+/// Instant orders tab — list, pagination, and pull-to-refresh.
 class InstantOrdersHistoryTab extends StatefulWidget {
   const InstantOrdersHistoryTab({super.key});
 
@@ -17,7 +16,6 @@ class InstantOrdersHistoryTab extends StatefulWidget {
 }
 
 class _InstantOrdersHistoryTabState extends State<InstantOrdersHistoryTab> {
-  final _searchController = TextEditingController();
   final _scrollController = ScrollController();
 
   @override
@@ -37,7 +35,6 @@ class _InstantOrdersHistoryTabState extends State<InstantOrdersHistoryTab> {
   @override
   void dispose() {
     _scrollController.dispose();
-    _searchController.dispose();
     super.dispose();
   }
 
@@ -45,109 +42,69 @@ class _InstantOrdersHistoryTabState extends State<InstantOrdersHistoryTab> {
   Widget build(BuildContext context) {
     return BlocBuilder<CustomerHistoryBloc, CustomerHistoryState>(
       builder: (context, state) {
-        return Column(
-          children: [
-            _buildSearchBar(context, state),
-            Expanded(child: _buildBody(context, state)),
-          ],
+        final orders = state.filteredInstantRequests;
+
+        if (state.isInstantListLoading) {
+          return const CustomerHistoryListSkeleton();
+        }
+        if (state.status == CustomerHistoryStatus.error &&
+            state.instantRequests.isEmpty) {
+          return CustomerHistoryErrorState(
+            message: state.errorMessage ?? 'Something went wrong',
+            onRetry: () => context
+                .read<CustomerHistoryBloc>()
+                .add(const LoadInstantHistory()),
+          );
+        }
+        if (orders.isEmpty && state.hasActiveSearchOrFilters) {
+          return CustomerHistoryNoResultsState(
+            onClearFilters: () => context
+                .read<CustomerHistoryBloc>()
+                .add(const ClearCurrentTabFilters()),
+          );
+        }
+        if (state.status == CustomerHistoryStatus.instantEmpty ||
+            (orders.isEmpty &&
+                state.status != CustomerHistoryStatus.loadingMore)) {
+          return CustomerHistoryEmptyState(
+            onRefresh: () => context
+                .read<CustomerHistoryBloc>()
+                .add(const LoadInstantHistory()),
+          );
+        }
+
+        return RefreshIndicator(
+          onRefresh: () async {
+            context.read<CustomerHistoryBloc>().add(const LoadInstantHistory());
+            await context.read<CustomerHistoryBloc>().stream.firstWhere(
+                  (s) =>
+                      s.status != CustomerHistoryStatus.loading &&
+                      !s.isInstantListLoading,
+                );
+          },
+          child: ListView.builder(
+            controller: _scrollController,
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            itemCount: orders.length + (state.isLoadingMore ? 1 : 0),
+            itemBuilder: (context, index) {
+              if (index >= orders.length) {
+                return const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              final order = orders[index];
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: CustomerHistoryOrderCard(
+                  order: order,
+                  onTap: () => _openDetails(context, order.id),
+                ),
+              );
+            },
+          ),
         );
       },
-    );
-  }
-
-  Widget _buildSearchBar(BuildContext context, CustomerHistoryState state) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Search ID, category, worker, address…',
-                prefixIcon: const Icon(Icons.search),
-                filled: true,
-                fillColor: Theme.of(context).cardColor,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(vertical: 0),
-              ),
-              onSubmitted: (v) {
-                context
-                    .read<CustomerHistoryBloc>()
-                    .add(SearchCustomerHistory(v));
-              },
-            ),
-          ),
-          const SizedBox(width: 8),
-          IconButton.filled(
-            onPressed: () => _openFilters(context, state),
-            icon: Badge(
-              isLabelVisible: state.filters.hasActiveFilters,
-              smallSize: 8,
-              child: const Icon(Icons.tune),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBody(BuildContext context, CustomerHistoryState state) {
-    if (state.isInstantListLoading) {
-      return const CustomerHistoryListSkeleton();
-    }
-    if (state.status == CustomerHistoryStatus.error &&
-        state.instantRequests.isEmpty) {
-      return CustomerHistoryErrorState(
-        message: state.errorMessage ?? 'Something went wrong',
-        onRetry: () =>
-            context.read<CustomerHistoryBloc>().add(const LoadInstantHistory()),
-      );
-    }
-    if (state.status == CustomerHistoryStatus.instantEmpty ||
-        (state.instantRequests.isEmpty &&
-            state.status != CustomerHistoryStatus.loadingMore)) {
-      return CustomerHistoryEmptyState(
-        onRefresh: () => context
-            .read<CustomerHistoryBloc>()
-            .add(const LoadInstantHistory()),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: () async {
-        context.read<CustomerHistoryBloc>().add(const LoadInstantHistory());
-        await context.read<CustomerHistoryBloc>().stream.firstWhere(
-              (s) =>
-                  s.status != CustomerHistoryStatus.loading &&
-                  !s.isInstantListLoading,
-            );
-      },
-      child: ListView.builder(
-        controller: _scrollController,
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-        itemCount:
-            state.instantRequests.length + (state.isLoadingMore ? 1 : 0),
-        itemBuilder: (context, index) {
-          if (index >= state.instantRequests.length) {
-            return const Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(child: CircularProgressIndicator()),
-            );
-          }
-          final order = state.instantRequests[index];
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: CustomerHistoryOrderCard(
-              order: order,
-              onTap: () => _openDetails(context, order.id),
-            ),
-          );
-        },
-      ),
     );
   }
 
@@ -161,171 +118,6 @@ class _InstantOrdersHistoryTabState extends State<InstantOrdersHistoryTab> {
           child: CustomerHistoryDetailsScreen(requestId: requestId),
         ),
       ),
-    );
-  }
-
-  Future<void> _openFilters(
-    BuildContext context,
-    CustomerHistoryState state,
-  ) async {
-    var filters = state.filters;
-    String? status = filters.statusFilter;
-    String? payment = filters.paymentFilter;
-    CustomerHistorySort sort = filters.sort;
-    DateTime? from = filters.dateFrom;
-    DateTime? to = filters.dateTo;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                top: 16,
-                bottom: MediaQuery.paddingOf(context).bottom + 16,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Filters & sort',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<String?>(
-                    initialValue: status,
-                    decoration: const InputDecoration(labelText: 'Status'),
-                    items: const [
-                      DropdownMenuItem(value: null, child: Text('All statuses')),
-                      DropdownMenuItem(value: 'pending', child: Text('Pending')),
-                      DropdownMenuItem(value: 'accepted', child: Text('Accepted')),
-                      DropdownMenuItem(
-                        value: 'in_progress',
-                        child: Text('In progress'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'bill_generated',
-                        child: Text('Bill generated'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'completed',
-                        child: Text('Completed'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'cancelled',
-                        child: Text('Cancelled'),
-                      ),
-                    ],
-                    onChanged: (v) => setModalState(() => status = v),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String?>(
-                    initialValue: payment,
-                    decoration: const InputDecoration(labelText: 'Payment'),
-                    items: const [
-                      DropdownMenuItem(value: null, child: Text('All payments')),
-                      DropdownMenuItem(value: 'unpaid', child: Text('Unpaid')),
-                      DropdownMenuItem(value: 'paid', child: Text('Paid')),
-                    ],
-                    onChanged: (v) => setModalState(() => payment = v),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<CustomerHistorySort>(
-                    initialValue: sort,
-                    decoration: const InputDecoration(labelText: 'Sort'),
-                    items: const [
-                      DropdownMenuItem(
-                        value: CustomerHistorySort.newest,
-                        child: Text('Newest first'),
-                      ),
-                      DropdownMenuItem(
-                        value: CustomerHistorySort.oldest,
-                        child: Text('Oldest first'),
-                      ),
-                      DropdownMenuItem(
-                        value: CustomerHistorySort.highestAmount,
-                        child: Text('Highest amount'),
-                      ),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) setModalState(() => sort = v);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () async {
-                            final range = await showDateRangePicker(
-                              context: context,
-                              firstDate: DateTime(2020),
-                              lastDate:
-                                  DateTime.now().add(const Duration(days: 365)),
-                            );
-                            if (range != null) {
-                              setModalState(() {
-                                from = range.start;
-                                to = range.end;
-                              });
-                            }
-                          },
-                          child: Text(
-                            from == null
-                                ? 'Date range'
-                                : '${from!.day}/${from!.month} – ${to!.day}/${to!.month}',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    children: [
-                      TextButton(
-                        onPressed: () {
-                          context.read<CustomerHistoryBloc>().add(
-                                const FilterCustomerHistory(
-                                  CustomerHistoryFilters(),
-                                ),
-                              );
-                          Navigator.pop(sheetContext);
-                        },
-                        child: const Text('Clear'),
-                      ),
-                      const Spacer(),
-                      ElevatedButton(
-                        onPressed: () {
-                          context.read<CustomerHistoryBloc>().add(
-                                FilterCustomerHistory(
-                                  CustomerHistoryFilters(
-                                    statusFilter: status,
-                                    paymentFilter: payment,
-                                    dateFrom: from,
-                                    dateTo: to,
-                                    sort: sort,
-                                  ),
-                                ),
-                              );
-                          Navigator.pop(sheetContext);
-                        },
-                        child: const Text('Apply'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
     );
   }
 }

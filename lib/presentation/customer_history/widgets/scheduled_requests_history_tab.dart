@@ -45,6 +45,8 @@ class _ScheduledRequestsHistoryTabState
   Widget build(BuildContext context) {
     return BlocBuilder<CustomerHistoryBloc, CustomerHistoryState>(
       builder: (context, state) {
+        final requests = state.filteredScheduledRequests;
+
         if (state.isScheduledListLoading) {
           return const CustomerHistoryListSkeleton();
         }
@@ -59,8 +61,16 @@ class _ScheduledRequestsHistoryTabState
           );
         }
 
+        if (requests.isEmpty && state.hasActiveSearchOrFilters) {
+          return CustomerHistoryNoResultsState(
+            onClearFilters: () => context
+                .read<CustomerHistoryBloc>()
+                .add(const ClearCurrentTabFilters()),
+          );
+        }
+
         if (state.status == CustomerHistoryStatus.scheduledEmpty ||
-            state.scheduledRequests.isEmpty) {
+            requests.isEmpty) {
           return ScheduledHistoryEmptyState(
             onRefresh: () => context
                 .read<CustomerHistoryBloc>()
@@ -82,16 +92,16 @@ class _ScheduledRequestsHistoryTabState
           child: ListView.builder(
             controller: _scrollController,
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            itemCount: state.scheduledRequests.length +
+            itemCount: requests.length +
                 (state.isScheduledLoadingMore ? 1 : 0),
             itemBuilder: (context, index) {
-              if (index >= state.scheduledRequests.length) {
+              if (index >= requests.length) {
                 return const Padding(
                   padding: EdgeInsets.all(16),
                   child: Center(child: CircularProgressIndicator()),
                 );
               }
-              final request = state.scheduledRequests[index];
+              final request = requests[index];
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: ScheduledRequestHistoryCard(

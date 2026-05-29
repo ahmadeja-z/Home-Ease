@@ -98,6 +98,54 @@ class CustomerHistoryEmptyState extends StatelessWidget {
   }
 }
 
+class CustomerHistoryNoResultsState extends StatelessWidget {
+  final VoidCallback? onClearFilters;
+
+  const CustomerHistoryNoResultsState({super.key, this.onClearFilters});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.search_off_rounded,
+              size: 64,
+              color: theme.colorScheme.primary.withValues(alpha: 0.4),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No matching results',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Try a different search term or adjust your filters.',
+              style: theme.textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+            ),
+            if (onClearFilters != null) ...[
+              const SizedBox(height: 24),
+              FilledButton.tonalIcon(
+                onPressed: onClearFilters,
+                icon: const Icon(Icons.filter_alt_off_outlined),
+                label: const Text('Clear search & filters'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class CustomerHistoryErrorState extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;

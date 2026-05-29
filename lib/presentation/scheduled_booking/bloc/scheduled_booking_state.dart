@@ -35,6 +35,9 @@ class ScheduledBookingState extends Equatable {
   final String? errorMessage;
   final String? successMessage;
   final bool locationLoading;
+  final bool isUsingCurrentLocation;
+  final bool isLocationManuallySelected;
+  final String? locationError;
 
   const ScheduledBookingState({
     this.status = ScheduledBookingUiStatus.initial,
@@ -50,6 +53,9 @@ class ScheduledBookingState extends Equatable {
     this.errorMessage,
     this.successMessage,
     this.locationLoading = false,
+    this.isUsingCurrentLocation = false,
+    this.isLocationManuallySelected = false,
+    this.locationError,
   });
 
   bool get isFormMode =>
@@ -66,8 +72,9 @@ class ScheduledBookingState extends Equatable {
       selectedDate != null &&
       selectedTime != null &&
       location != null &&
-      address.trim().isNotEmpty &&
       status != ScheduledBookingUiStatus.submitting;
+
+  bool get hasServiceLocation => location != null;
 
   PricingType get formPricingType {
     if (service == null) return PricingType.unknown;
@@ -95,6 +102,10 @@ class ScheduledBookingState extends Equatable {
     String? errorMessage,
     String? successMessage,
     bool? locationLoading,
+    bool? isUsingCurrentLocation,
+    bool? isLocationManuallySelected,
+    String? locationError,
+    bool clearLocationError = false,
     bool clearError = false,
     bool clearSuccess = false,
     bool clearBooking = false,
@@ -114,6 +125,13 @@ class ScheduledBookingState extends Equatable {
       successMessage:
           clearSuccess ? null : (successMessage ?? this.successMessage),
       locationLoading: locationLoading ?? this.locationLoading,
+      isUsingCurrentLocation:
+          isUsingCurrentLocation ?? this.isUsingCurrentLocation,
+      isLocationManuallySelected:
+          isLocationManuallySelected ?? this.isLocationManuallySelected,
+      locationError: clearLocationError
+          ? null
+          : (locationError ?? this.locationError),
     );
   }
 
@@ -132,5 +150,8 @@ class ScheduledBookingState extends Equatable {
         errorMessage,
         successMessage,
         locationLoading,
+        isUsingCurrentLocation,
+        isLocationManuallySelected,
+        locationError,
       ];
 }

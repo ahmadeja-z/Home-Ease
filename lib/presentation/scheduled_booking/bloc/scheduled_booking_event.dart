@@ -17,7 +17,27 @@ class InitializeScheduledBookingForm extends ScheduledBookingEvent {
 }
 
 class LoadScheduledBookingLocation extends ScheduledBookingEvent {
-  const LoadScheduledBookingLocation();
+  final bool forceRefresh;
+
+  const LoadScheduledBookingLocation({this.forceRefresh = false});
+
+  @override
+  List<Object?> get props => [forceRefresh];
+}
+
+class ApplyPickedScheduledLocation extends ScheduledBookingEvent {
+  final LatLng location;
+  final String address;
+  final bool usedFallbackAddress;
+
+  const ApplyPickedScheduledLocation({
+    required this.location,
+    required this.address,
+    this.usedFallbackAddress = false,
+  });
+
+  @override
+  List<Object?> get props => [location, address, usedFallbackAddress];
 }
 
 class UpdateScheduledBookingAddress extends ScheduledBookingEvent {

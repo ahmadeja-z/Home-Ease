@@ -16,6 +16,8 @@ import 'package:homeease/presentation/customer_history/screens/scheduled_history
 import 'package:homeease/repositories/scheduled_booking_repository.dart';
 import 'package:homeease/widgets/app_cache_image.dart';
 import 'package:homeease/widgets/custom_app_bar.dart';
+import 'package:homeease/presentation/location_picker/location_picker_screen.dart';
+import 'package:homeease/presentation/location_picker/models/location_picker_result.dart';
 import 'package:homeease/widgets/custom_elevated_button.dart';
 
 class ScheduledBookingScreen extends StatelessWidget {
@@ -64,26 +66,33 @@ class _ScheduledBookingFormViewState extends State<_ScheduledBookingFormView> {
           p.errorMessage != c.errorMessage ||
           p.successMessage != c.successMessage,
       listener: (context, state) {
+        if (!context.mounted) return;
+
         if (_addressController.text != state.address) {
           _addressController.text = state.address;
         }
 
         if (state.status == ScheduledBookingUiStatus.submitSuccess &&
             state.requestId != null) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute<void>(
-              builder: (_) => BlocProvider(
-                create: (_) => CustomerHistoryBloc(
-                  repository: CustomerHistoryRepository(),
-                )
-                  ..add(LoadScheduledHistoryDetails(state.requestId!))
-                  ..add(const StartCustomerHistoryRealtime()),
-                child: ScheduledHistoryDetailsScreen(
-                  requestId: state.requestId!,
+          final requestId = state.requestId!;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!context.mounted) return;
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute<void>(
+                builder: (_) => BlocProvider(
+                  create: (_) => CustomerHistoryBloc(
+                    repository: CustomerHistoryRepository(),
+                  )
+                    ..add(LoadScheduledHistoryDetails(requestId))
+                    ..add(const StartCustomerHistoryRealtime()),
+                  child: ScheduledHistoryDetailsScreen(
+                    requestId: requestId,
+                  ),
                 ),
               ),
-            ),
-          );
+            );
+          });
+          return;
         }
 
         if (state.errorMessage != null &&
@@ -127,9 +136,12 @@ class _ScheduledBookingFormViewState extends State<_ScheduledBookingFormView> {
                 _LocationSection(
                   state: state,
                   addressController: _addressController,
+                  onPickLocation: () => _openLocationPicker(context, state),
                   onUseCurrentLocation: () => context
                       .read<ScheduledBookingBloc>()
-                      .add(const LoadScheduledBookingLocation()),
+                      .add(
+                        const LoadScheduledBookingLocation(forceRefresh: true),
+                      ),
                 ),
                 const SizedBox(height: 20),
                 _sectionTitle(context, 'Description'),
@@ -183,6 +195,42 @@ class _ScheduledBookingFormViewState extends State<_ScheduledBookingFormView> {
         );
       },
     );
+  }
+
+  Future<void> _openLocationPicker(
+    BuildContext context,
+    ScheduledBookingState state,
+  ) async {
+    final result = await Navigator.of(context).push<LocationPickerResult>(
+      MaterialPageRoute<LocationPickerResult>(
+        builder: (_) => LocationPickerScreen(
+          initialLocation: state.location,
+          initialAddress:
+              state.address.trim().isNotEmpty ? state.address : null,
+        ),
+      ),
+    );
+
+    if (result == null || !context.mounted) return;
+
+    context.read<ScheduledBookingBloc>().add(
+          ApplyPickedScheduledLocation(
+            location: result.location,
+            address: result.address,
+            usedFallbackAddress: result.usedFallbackAddress,
+          ),
+        );
+
+    if (result.usedFallbackAddress && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Address could not be resolved. Coordinates will be saved.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Widget _sectionTitle(BuildContext context, String text) {
@@ -363,59 +411,155 @@ class _DateTimeRow extends StatelessWidget {
 class _LocationSection extends StatelessWidget {
   final ScheduledBookingState state;
   final TextEditingController addressController;
+  final VoidCallback onPickLocation;
   final VoidCallback onUseCurrentLocation;
 
   const _LocationSection({
     required this.state,
     required this.addressController,
+    required this.onPickLocation,
     required this.onUseCurrentLocation,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final hasCoords = state.location != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
-          controller: addressController,
-          maxLines: 2,
-          decoration: InputDecoration(
-            hintText: 'Street address, building, etc.',
-            filled: true,
-            fillColor: theme.cardColor,
-            prefixIcon: const Icon(Icons.location_on_outlined),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
+        Material(
+          elevation: 2,
+          borderRadius: BorderRadius.circular(16),
+          color: theme.cardColor,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.place,
+                      color: theme.colorScheme.primary,
+                      size: 22,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Service address',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (state.isLocationManuallySelected) ...[
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary.withValues(
+                            alpha: 0.12,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Custom',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: addressController,
+                  readOnly: true,
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    hintText: hasCoords
+                        ? 'Address will appear here'
+                        : 'Pick a location or use current GPS',
+                    filled: true,
+                    fillColor: theme.scaffoldBackgroundColor,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+                if (hasCoords) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '${state.location!.latitude.toStringAsFixed(5)}, '
+                    '${state.location!.longitude.toStringAsFixed(5)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.hintColor,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
-          onChanged: (v) => context.read<ScheduledBookingBloc>().add(
-                UpdateScheduledBookingAddress(v),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: state.locationLoading ? null : onPickLocation,
+                icon: const Icon(Icons.map_outlined, size: 18),
+                label: const Text('Pick location'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
               ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: state.locationLoading ? null : onUseCurrentLocation,
+                icon: state.locationLoading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.my_location, size: 18),
+                label: const Text('Use current location'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: state.locationLoading ? null : onUseCurrentLocation,
-          icon: state.locationLoading
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.my_location),
-          label: Text(
-            state.location != null
-                ? 'Location: ${state.location!.latitude.toStringAsFixed(4)}, '
-                    '${state.location!.longitude.toStringAsFixed(4)}'
-                : 'Use current location',
-          ),
-        ),
-        if (state.location == null && !state.locationLoading)
+        if (state.locationError != null)
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Text(
-              'Location is required. Tap the button above or enable GPS.',
+              state.locationError!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppTheme.warningColor,
+              ),
+            ),
+          ),
+        if (!hasCoords && !state.locationLoading)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'Please select service location.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: AppTheme.warningColor,
               ),

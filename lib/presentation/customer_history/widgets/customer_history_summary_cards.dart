@@ -52,7 +52,7 @@ class CustomerHistorySummaryCards extends StatelessWidget {
     ];
 
     return SizedBox(
-      height: 108,
+      height: 100,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -64,11 +64,11 @@ class CustomerHistorySummaryCards extends StatelessWidget {
             width: 128,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: theme.cardColor,
+              color: Theme.of(context).colorScheme.onPrimary,
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06),
+                  color: Theme.of(context).colorScheme.onSecondary.withValues(alpha: 0.06),
                   blurRadius: 12,
                   offset: const Offset(0, 4),
                 ),
@@ -91,6 +91,7 @@ class CustomerHistorySummaryCards extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
+                const SizedBox(height: 2),
                 Text(
                   item.label,
                   style: theme.textTheme.bodySmall,

@@ -34,6 +34,17 @@ class RefreshCustomerHistory extends CustomerHistoryEvent {
   const RefreshCustomerHistory();
 }
 
+/// Tab switched — clears search/filters for the new tab and reloads its data.
+class CustomerHistoryTabChanged extends CustomerHistoryEvent {
+  final CustomerHistoryTab tab;
+
+  const CustomerHistoryTabChanged(this.tab);
+
+  @override
+  List<Object?> get props => [tab];
+}
+
+/// @deprecated Use [CustomerHistoryTabChanged].
 class ChangeCustomerHistoryTab extends CustomerHistoryEvent {
   final CustomerHistoryTab tab;
 
@@ -43,6 +54,16 @@ class ChangeCustomerHistoryTab extends CustomerHistoryEvent {
   List<Object?> get props => [tab];
 }
 
+class CustomerHistorySearchChanged extends CustomerHistoryEvent {
+  final String query;
+
+  const CustomerHistorySearchChanged(this.query);
+
+  @override
+  List<Object?> get props => [query];
+}
+
+/// @deprecated Use [CustomerHistorySearchChanged].
 class SearchCustomerHistory extends CustomerHistoryEvent {
   final String query;
 
@@ -52,6 +73,35 @@ class SearchCustomerHistory extends CustomerHistoryEvent {
   List<Object?> get props => [query];
 }
 
+/// Dispatched when the filter button is tapped (UI may open the sheet).
+class CustomerHistoryFilterOpened extends CustomerHistoryEvent {
+  const CustomerHistoryFilterOpened();
+}
+
+class ApplyScheduledHistoryFilters extends CustomerHistoryEvent {
+  final CustomerHistoryFilters filters;
+
+  const ApplyScheduledHistoryFilters(this.filters);
+
+  @override
+  List<Object?> get props => [filters];
+}
+
+class ApplyInstantHistoryFilters extends CustomerHistoryEvent {
+  final CustomerHistoryFilters filters;
+
+  const ApplyInstantHistoryFilters(this.filters);
+
+  @override
+  List<Object?> get props => [filters];
+}
+
+/// Clears search + filters for the currently selected tab and reloads.
+class ClearCurrentTabFilters extends CustomerHistoryEvent {
+  const ClearCurrentTabFilters();
+}
+
+/// @deprecated Use [ApplyInstantHistoryFilters].
 class FilterCustomerHistory extends CustomerHistoryEvent {
   final CustomerHistoryFilters filters;
 

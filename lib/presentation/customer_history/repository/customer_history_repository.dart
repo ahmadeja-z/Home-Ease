@@ -81,6 +81,12 @@ class CustomerHistoryRepository {
     required String customerId,
     int limit = 20,
     int offset = 0,
+    String? searchQuery,
+    String? statusFilter,
+    String? paymentFilter,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String? categoryId,
     CustomerHistorySort sort = CustomerHistorySort.newest,
   }) async {
     try {
@@ -92,6 +98,15 @@ class CustomerHistoryRepository {
           .eq('request_flow', 'admin_assign')
           .inFilter('status', scheduledHistoryStatuses);
 
+      query = _applyHistoryFilters(
+        query,
+        statusFilter: statusFilter,
+        paymentFilter: paymentFilter,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+        categoryId: categoryId,
+      );
+
       query = _applySort(query, sort);
       query = query.range(offset, offset + limit - 1);
 
@@ -100,7 +115,13 @@ class CustomerHistoryRepository {
       for (final row in rows.cast<Map<String, dynamic>>()) {
         enriched.add(await _enrichWithService(row));
       }
-      return _mapRowsWithWorkers(enriched);
+      var models = await _mapRowsWithWorkers(enriched);
+
+      if (searchQuery != null && searchQuery.trim().isNotEmpty) {
+        models = _applySearch(models, searchQuery.trim());
+      }
+
+      return models;
     } on PostgrestException catch (e) {
       if (kDebugMode) {
         print('CustomerHistoryRepository fetchScheduledHistory: ${e.message}');
@@ -148,6 +169,9 @@ class CustomerHistoryRepository {
     String? paymentFilter,
     DateTime? dateFrom,
     DateTime? dateTo,
+    String? categoryId,
+    double? minPrice,
+    double? maxPrice,
     CustomerHistorySort sort = CustomerHistorySort.newest,
   }) async {
     try {
@@ -156,28 +180,19 @@ class CustomerHistoryRepository {
           .select('*')
           .eq('customer_id', customerId)
           .eq('booking_type', 'instant')
+          .eq('request_flow', 'direct_worker')
           .inFilter('status', instantHistoryStatuses);
 
-      if (statusFilter != null && statusFilter.isNotEmpty) {
-        query = query.eq('status', statusFilter);
-      }
-      if (paymentFilter != null && paymentFilter.isNotEmpty) {
-        query = query.eq('payment_status', paymentFilter);
-      }
-      if (dateFrom != null) {
-        query = query.gte('created_at', dateFrom.toUtc().toIso8601String());
-      }
-      if (dateTo != null) {
-        final end = DateTime(
-          dateTo.year,
-          dateTo.month,
-          dateTo.day,
-          23,
-          59,
-          59,
-        );
-        query = query.lte('created_at', end.toUtc().toIso8601String());
-      }
+      query = _applyHistoryFilters(
+        query,
+        statusFilter: statusFilter,
+        paymentFilter: paymentFilter,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+        categoryId: categoryId,
+        minPrice: minPrice,
+        maxPrice: maxPrice,
+      );
 
       query = _applySort(query, sort);
       query = query.range(offset, offset + limit - 1);
@@ -234,6 +249,7 @@ class CustomerHistoryRepository {
           .select('*')
           .eq('id', requestId)
           .eq('booking_type', 'instant')
+          .eq('request_flow', 'direct_worker')
           .maybeSingle();
 
       if (row == null) {
@@ -435,6 +451,48 @@ class CustomerHistoryRepository {
   ) =>
       subscribeCustomerHistoryUpdates(customerId);
 
+  dynamic _applyHistoryFilters(
+    dynamic query, {
+    String? statusFilter,
+    String? paymentFilter,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String? categoryId,
+    double? minPrice,
+    double? maxPrice,
+  }) {
+    if (statusFilter != null && statusFilter.isNotEmpty) {
+      query = query.eq('status', statusFilter);
+    }
+    if (paymentFilter != null && paymentFilter.isNotEmpty) {
+      query = query.eq('payment_status', paymentFilter);
+    }
+    if (categoryId != null && categoryId.isNotEmpty) {
+      query = query.eq('category_id', categoryId);
+    }
+    if (dateFrom != null) {
+      query = query.gte('created_at', dateFrom.toUtc().toIso8601String());
+    }
+    if (dateTo != null) {
+      final end = DateTime(
+        dateTo.year,
+        dateTo.month,
+        dateTo.day,
+        23,
+        59,
+        59,
+      );
+      query = query.lte('created_at', end.toUtc().toIso8601String());
+    }
+    if (minPrice != null) {
+      query = query.gte('final_amount', minPrice);
+    }
+    if (maxPrice != null) {
+      query = query.lte('final_amount', maxPrice);
+    }
+    return query;
+  }
+
   dynamic _applySort(dynamic query, CustomerHistorySort sort) {
     switch (sort) {
       case CustomerHistorySort.oldest:
@@ -481,7 +539,13 @@ class CustomerHistoryRepository {
       final service = (o.serviceTitle ?? '').toLowerCase().contains(q);
       final address = (o.customerAddress ?? '').toLowerCase().contains(q);
       final worker = (o.workerInfo?.name ?? '').toLowerCase().contains(q);
-      return idMatch || category || service || address || worker;
+      final description = (o.description ?? '').toLowerCase().contains(q);
+      return idMatch ||
+          category ||
+          service ||
+          address ||
+          worker ||
+          description;
     }).toList();
   }
 

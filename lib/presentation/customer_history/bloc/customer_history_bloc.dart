@@ -25,9 +25,15 @@ class CustomerHistoryBloc
     on<LoadMoreScheduledHistory>(_onLoadMoreScheduled);
     on<LoadMoreCustomerHistory>(_onLoadMoreInstant);
     on<RefreshCustomerHistory>(_onRefresh);
-    on<ChangeCustomerHistoryTab>(_onChangeTab);
-    on<SearchCustomerHistory>(_onSearch);
-    on<FilterCustomerHistory>(_onFilter);
+    on<CustomerHistoryTabChanged>(_onTabChanged);
+    on<ChangeCustomerHistoryTab>(_onLegacyTabChanged);
+    on<CustomerHistorySearchChanged>(_onSearchChanged);
+    on<SearchCustomerHistory>(_onLegacySearch);
+    on<ApplyScheduledHistoryFilters>(_onApplyScheduledFilters);
+    on<ApplyInstantHistoryFilters>(_onApplyInstantFilters);
+    on<ClearCurrentTabFilters>(_onClearCurrentTabFilters);
+    on<FilterCustomerHistory>(_onLegacyFilter);
+    on<CustomerHistoryFilterOpened>((_, _) {});
     on<LoadCustomerHistoryDetails>(_onLoadInstantDetails);
     on<LoadScheduledHistoryDetails>(_onLoadScheduledDetails);
     on<LoadScheduledRequestDetails>(_onLoadScheduledRequestDetails);
@@ -77,25 +83,22 @@ class CustomerHistoryBloc
         customerId: customerId,
         limit: CustomerHistoryState.pageSize,
         offset: 0,
-        sort: state.filters.sort,
+        sort: state.scheduledFilters.sort,
       );
 
       final instant = await repository.fetchInstantHistory(
         customerId: customerId,
         limit: CustomerHistoryState.pageSize,
         offset: 0,
-        searchQuery: state.searchQuery.isEmpty ? null : state.searchQuery,
-        statusFilter: state.filters.statusFilter,
-        paymentFilter: state.filters.paymentFilter,
-        dateFrom: state.filters.dateFrom,
-        dateTo: state.filters.dateTo,
-        sort: state.filters.sort,
+        sort: state.instantFilters.sort,
       );
 
       emit(state.copyWith(
         status: _resolveListStatus(scheduled, instant),
         scheduledRequests: scheduled,
         instantRequests: instant,
+        filteredScheduledRequests: scheduled,
+        filteredInstantRequests: instant,
         summary: summary,
         scheduledOffset: scheduled.length,
         instantOffset: instant.length,
@@ -125,18 +128,14 @@ class CustomerHistoryBloc
     ));
 
     try {
-      final scheduled = await repository.fetchScheduledHistory(
-        customerId: customerId,
-        limit: CustomerHistoryState.pageSize,
-        offset: 0,
-        sort: state.filters.sort,
-      );
+      final scheduled = await _fetchScheduledPage(customerId, offset: 0);
 
       emit(state.copyWith(
         status: scheduled.isEmpty
             ? CustomerHistoryStatus.scheduledEmpty
             : CustomerHistoryStatus.loaded,
         scheduledRequests: scheduled,
+        filteredScheduledRequests: scheduled,
         scheduledOffset: scheduled.length,
         scheduledHasMore: scheduled.length >= CustomerHistoryState.pageSize,
       ));
@@ -163,23 +162,14 @@ class CustomerHistoryBloc
     ));
 
     try {
-      final instant = await repository.fetchInstantHistory(
-        customerId: customerId,
-        limit: CustomerHistoryState.pageSize,
-        offset: 0,
-        searchQuery: state.searchQuery.isEmpty ? null : state.searchQuery,
-        statusFilter: state.filters.statusFilter,
-        paymentFilter: state.filters.paymentFilter,
-        dateFrom: state.filters.dateFrom,
-        dateTo: state.filters.dateTo,
-        sort: state.filters.sort,
-      );
+      final instant = await _fetchInstantPage(customerId, offset: 0);
 
       emit(state.copyWith(
         status: instant.isEmpty
             ? CustomerHistoryStatus.instantEmpty
             : CustomerHistoryStatus.loaded,
         instantRequests: instant,
+        filteredInstantRequests: instant,
         instantOffset: instant.length,
         instantHasMore: instant.length >= CustomerHistoryState.pageSize,
       ));
@@ -203,11 +193,9 @@ class CustomerHistoryBloc
     emit(state.copyWith(isScheduledLoadingMore: true));
 
     try {
-      final more = await repository.fetchScheduledHistory(
-        customerId: customerId,
-        limit: CustomerHistoryState.pageSize,
+      final more = await _fetchScheduledPage(
+        customerId,
         offset: state.scheduledOffset,
-        sort: state.filters.sort,
       );
 
       final merged = _mergeOrders(state.scheduledRequests, more);
@@ -217,6 +205,7 @@ class CustomerHistoryBloc
             ? CustomerHistoryStatus.scheduledEmpty
             : CustomerHistoryStatus.loaded,
         scheduledRequests: merged,
+        filteredScheduledRequests: merged,
         scheduledOffset: state.scheduledOffset + more.length,
         scheduledHasMore: more.length >= CustomerHistoryState.pageSize,
         isScheduledLoadingMore: false,
@@ -244,16 +233,9 @@ class CustomerHistoryBloc
     ));
 
     try {
-      final more = await repository.fetchInstantHistory(
-        customerId: customerId,
-        limit: CustomerHistoryState.pageSize,
+      final more = await _fetchInstantPage(
+        customerId,
         offset: state.instantOffset,
-        searchQuery: state.searchQuery.isEmpty ? null : state.searchQuery,
-        statusFilter: state.filters.statusFilter,
-        paymentFilter: state.filters.paymentFilter,
-        dateFrom: state.filters.dateFrom,
-        dateTo: state.filters.dateTo,
-        sort: state.filters.sort,
       );
 
       final merged = _mergeOrders(state.instantRequests, more);
@@ -263,6 +245,7 @@ class CustomerHistoryBloc
             ? CustomerHistoryStatus.instantEmpty
             : CustomerHistoryStatus.loaded,
         instantRequests: merged,
+        filteredInstantRequests: merged,
         instantOffset: state.instantOffset + more.length,
         instantHasMore: more.length >= CustomerHistoryState.pageSize,
         isLoadingMore: false,
@@ -295,27 +278,133 @@ class CustomerHistoryBloc
     }
   }
 
-  void _onChangeTab(
+  Future<void> _onTabChanged(
+    CustomerHistoryTabChanged event,
+    Emitter<CustomerHistoryState> emit,
+  ) async {
+    if (state.selectedTab == event.tab) return;
+
+    emit(
+      state.copyWith(
+        selectedTab: event.tab,
+        clearScheduledSearch: event.tab == CustomerHistoryTab.scheduled,
+        clearInstantSearch: event.tab == CustomerHistoryTab.instant,
+        clearScheduledFilters: event.tab == CustomerHistoryTab.scheduled,
+        clearInstantFilters: event.tab == CustomerHistoryTab.instant,
+      ),
+    );
+
+    if (event.tab == CustomerHistoryTab.scheduled) {
+      add(const LoadScheduledHistory());
+    } else {
+      add(const LoadInstantHistory());
+    }
+  }
+
+  void _onLegacyTabChanged(
     ChangeCustomerHistoryTab event,
     Emitter<CustomerHistoryState> emit,
   ) {
-    emit(state.copyWith(selectedTab: event.tab));
+    add(CustomerHistoryTabChanged(event.tab));
   }
 
-  Future<void> _onSearch(
+  Future<void> _onSearchChanged(
+    CustomerHistorySearchChanged event,
+    Emitter<CustomerHistoryState> emit,
+  ) async {
+    final query = event.query.trim();
+    if (state.selectedTab == CustomerHistoryTab.scheduled) {
+      emit(state.copyWith(scheduledSearchQuery: query));
+      add(const LoadScheduledHistory());
+    } else {
+      emit(state.copyWith(instantSearchQuery: query));
+      add(const LoadInstantHistory());
+    }
+  }
+
+  void _onLegacySearch(
     SearchCustomerHistory event,
     Emitter<CustomerHistoryState> emit,
+  ) {
+    add(CustomerHistorySearchChanged(event.query));
+  }
+
+  Future<void> _onApplyScheduledFilters(
+    ApplyScheduledHistoryFilters event,
+    Emitter<CustomerHistoryState> emit,
   ) async {
-    emit(state.copyWith(searchQuery: event.query));
+    emit(state.copyWith(scheduledFilters: event.filters));
+    add(const LoadScheduledHistory());
+  }
+
+  Future<void> _onApplyInstantFilters(
+    ApplyInstantHistoryFilters event,
+    Emitter<CustomerHistoryState> emit,
+  ) async {
+    emit(state.copyWith(instantFilters: event.filters));
     add(const LoadInstantHistory());
   }
 
-  Future<void> _onFilter(
-    FilterCustomerHistory event,
+  Future<void> _onClearCurrentTabFilters(
+    ClearCurrentTabFilters event,
     Emitter<CustomerHistoryState> emit,
   ) async {
-    emit(state.copyWith(filters: event.filters));
-    add(const LoadInstantHistory());
+    if (state.selectedTab == CustomerHistoryTab.scheduled) {
+      emit(state.copyWith(clearScheduledFilters: true, clearScheduledSearch: true));
+      add(const LoadScheduledHistory());
+    } else {
+      emit(state.copyWith(clearInstantFilters: true, clearInstantSearch: true));
+      add(const LoadInstantHistory());
+    }
+  }
+
+  void _onLegacyFilter(
+    FilterCustomerHistory event,
+    Emitter<CustomerHistoryState> emit,
+  ) {
+    add(ApplyInstantHistoryFilters(event.filters));
+  }
+
+  Future<List<ServiceRequestModel>> _fetchScheduledPage(
+    String customerId, {
+    required int offset,
+  }) {
+    final f = state.scheduledFilters;
+    final search = state.scheduledSearchQuery;
+    return repository.fetchScheduledHistory(
+      customerId: customerId,
+      limit: CustomerHistoryState.pageSize,
+      offset: offset,
+      searchQuery: search.isEmpty ? null : search,
+      statusFilter: f.statusFilter,
+      paymentFilter: f.paymentFilter,
+      dateFrom: f.dateFrom,
+      dateTo: f.dateTo,
+      categoryId: f.categoryId,
+      sort: f.sort,
+    );
+  }
+
+  Future<List<ServiceRequestModel>> _fetchInstantPage(
+    String customerId, {
+    required int offset,
+  }) {
+    final f = state.instantFilters;
+    final search = state.instantSearchQuery;
+    return repository.fetchInstantHistory(
+      customerId: customerId,
+      limit: CustomerHistoryState.pageSize,
+      offset: offset,
+      searchQuery: search.isEmpty ? null : search,
+      statusFilter: f.statusFilter,
+      paymentFilter: f.paymentFilter,
+      dateFrom: f.dateFrom,
+      dateTo: f.dateTo,
+      categoryId: f.categoryId,
+      minPrice: f.minPrice,
+      maxPrice: f.maxPrice,
+      sort: f.sort,
+    );
   }
 
   Future<void> _onLoadInstantDetails(
@@ -410,11 +499,15 @@ class CustomerHistoryBloc
       final list = state.scheduledRequests
           .map((o) => o.id == event.requestId ? updated : o)
           .toList();
+      final filtered = state.filteredScheduledRequests
+          .map((o) => o.id == event.requestId ? updated : o)
+          .toList();
 
       emit(state.copyWith(
         isCancellingScheduled: false,
         selectedScheduledRequest: updated,
         scheduledRequests: list,
+        filteredScheduledRequests: filtered,
         status: CustomerHistoryStatus.detailsLoaded,
         scheduledStatusAlert: 'Your scheduled request was cancelled.',
       ));
@@ -517,6 +610,9 @@ class CustomerHistoryBloc
       final scheduledList = state.scheduledRequests
           .map((o) => o.id == event.requestId ? updated : o)
           .toList();
+      final filteredScheduled = state.filteredScheduledRequests
+          .map((o) => o.id == event.requestId ? updated : o)
+          .toList();
 
       final selected = state.selectedScheduledRequest?.id == event.requestId
           ? updated
@@ -525,6 +621,7 @@ class CustomerHistoryBloc
       emit(state.copyWith(
         isPayingInvoice: false,
         scheduledRequests: scheduledList,
+        filteredScheduledRequests: filteredScheduled,
         selectedScheduledRequest: selected,
         status: CustomerHistoryStatus.detailsLoaded,
       ));
@@ -560,11 +657,18 @@ class CustomerHistoryBloc
         }
         return o;
       }).toList();
+      final filtered = state.filteredInstantRequests.map((o) {
+        if (o.id == event.requestId) {
+          return o.copyWith(rating: event.rating, review: event.review);
+        }
+        return o;
+      }).toList();
 
       emit(state.copyWith(
         status: CustomerHistoryStatus.reviewSubmitted,
         selectedOrder: updated,
         instantRequests: list,
+        filteredInstantRequests: filtered,
       ));
     } catch (e) {
       emit(state.copyWith(
@@ -623,13 +727,19 @@ class CustomerHistoryBloc
       final scheduledStream = streamOrders.where(_isScheduledRequest).toList();
       final instantStream = streamOrders.where(_isInstantRequest).toList();
 
-      final scheduledMerged =
-          _mergeRealtimeList(state.scheduledRequests, scheduledStream, null);
+      final scheduledMerged = _mergeRealtimeList(
+        state.scheduledRequests,
+        scheduledStream,
+        _matchesScheduledFilters,
+      );
       final instantMerged = _mergeRealtimeList(
         state.instantRequests,
         instantStream,
         _matchesInstantFilters,
       );
+
+      final filteredScheduled = _filterScheduledList(scheduledMerged);
+      final filteredInstant = _filterInstantList(instantMerged);
 
       var selectedScheduled = state.selectedScheduledRequest;
       String? alert;
@@ -652,11 +762,16 @@ class CustomerHistoryBloc
 
       emit(state.copyWith(
         summary: summary,
-        scheduledRequests: _sortOrders(scheduledMerged, state.filters.sort),
-        instantRequests: _sortOrders(instantMerged, state.filters.sort),
+        scheduledRequests:
+            _sortOrders(scheduledMerged, state.scheduledFilters.sort),
+        instantRequests: _sortOrders(instantMerged, state.instantFilters.sort),
+        filteredScheduledRequests:
+            _sortOrders(filteredScheduled, state.scheduledFilters.sort),
+        filteredInstantRequests:
+            _sortOrders(filteredInstant, state.instantFilters.sort),
         selectedScheduledRequest: selectedScheduled,
         selectedOrder: selectedInstant,
-        status: _resolveListStatus(scheduledMerged, instantMerged),
+        status: _resolveListStatus(filteredScheduled, filteredInstant),
         scheduledStatusAlert: alert ?? state.scheduledStatusAlert,
       ));
     } catch (_) {}
@@ -667,7 +782,58 @@ class CustomerHistoryBloc
       o.requestFlow == RequestFlow.adminAssign;
 
   bool _isInstantRequest(ServiceRequestModel o) =>
-      o.bookingType == RequestType.instant;
+      o.bookingType == RequestType.instant &&
+      o.requestFlow == RequestFlow.directWorker;
+
+  bool _matchesScheduledFilters(ServiceRequestModel o) {
+    if (!_isScheduledRequest(o)) return false;
+    final f = state.scheduledFilters;
+    if (f.statusFilter != null && o.status.value != f.statusFilter) {
+      return false;
+    }
+    if (f.paymentFilter != null &&
+        o.paymentStatus.value != f.paymentFilter) {
+      return false;
+    }
+    if (f.categoryId != null && o.categoryId != f.categoryId) return false;
+    if (state.scheduledSearchQuery.isNotEmpty &&
+        !_matchesSearchQuery(o, state.scheduledSearchQuery)) {
+      return false;
+    }
+    return true;
+  }
+
+  List<ServiceRequestModel> _filterScheduledList(
+    List<ServiceRequestModel> orders,
+  ) {
+    if (!state.scheduledFilters.hasActiveFilters &&
+        state.scheduledSearchQuery.trim().isEmpty) {
+      return orders;
+    }
+    return orders.where(_matchesScheduledFilters).toList();
+  }
+
+  List<ServiceRequestModel> _filterInstantList(
+    List<ServiceRequestModel> orders,
+  ) {
+    if (!state.instantFilters.hasActiveFilters &&
+        state.instantSearchQuery.trim().isEmpty) {
+      return orders;
+    }
+    return orders.where(_matchesInstantFilters).toList();
+  }
+
+  bool _matchesSearchQuery(ServiceRequestModel o, String query) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    return o.id.toLowerCase().contains(q) ||
+        o.shortRequestId.toLowerCase().contains(q) ||
+        (o.categoryName ?? '').toLowerCase().contains(q) ||
+        (o.serviceTitle ?? '').toLowerCase().contains(q) ||
+        (o.customerAddress ?? '').toLowerCase().contains(q) ||
+        (o.workerInfo?.name ?? '').toLowerCase().contains(q) ||
+        (o.description ?? '').toLowerCase().contains(q);
+  }
 
   List<ServiceRequestModel> _mergeRealtimeList(
     List<ServiceRequestModel> current,
@@ -689,22 +855,20 @@ class CustomerHistoryBloc
 
   bool _matchesInstantFilters(ServiceRequestModel o) {
     if (!_isInstantRequest(o)) return false;
-    if (state.filters.statusFilter != null &&
-        o.status.value != state.filters.statusFilter) {
+    final f = state.instantFilters;
+    if (f.statusFilter != null && o.status.value != f.statusFilter) {
       return false;
     }
-    if (state.filters.paymentFilter != null &&
-        o.paymentStatus.value != state.filters.paymentFilter) {
+    if (f.paymentFilter != null &&
+        o.paymentStatus.value != f.paymentFilter) {
       return false;
     }
-    if (state.searchQuery.isNotEmpty) {
-      final q = state.searchQuery.trim().toLowerCase();
-      final match = o.id.toLowerCase().contains(q) ||
-          o.shortRequestId.toLowerCase().contains(q) ||
-          (o.categoryName ?? '').toLowerCase().contains(q) ||
-          (o.customerAddress ?? '').toLowerCase().contains(q) ||
-          (o.workerInfo?.name ?? '').toLowerCase().contains(q);
-      if (!match) return false;
+    if (f.categoryId != null && o.categoryId != f.categoryId) return false;
+    if (f.minPrice != null && o.displayAmount < f.minPrice!) return false;
+    if (f.maxPrice != null && o.displayAmount > f.maxPrice!) return false;
+    if (state.instantSearchQuery.isNotEmpty &&
+        !_matchesSearchQuery(o, state.instantSearchQuery)) {
+      return false;
     }
     return true;
   }

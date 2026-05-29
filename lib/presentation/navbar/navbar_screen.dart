@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:homeease/core/assets/app_images.dart';
+import 'package:homeease/presentation/customer_history/screens/customer_history_screen.dart';
 import 'package:homeease/presentation/drawer/drawer.dart';
 import 'package:homeease/presentation/home/home_screen.dart';
 import 'package:homeease/presentation/profile/profile_screen.dart';
@@ -9,7 +10,6 @@ import '../map_requests/map_requests_screen.dart';
 import 'bloc/navbar_bloc.dart';
 import 'bloc/navbar_event.dart';
 import 'bloc/navbar_state.dart';
-import 'screens/activities_tab_screen.dart';
 
 class NavbarScreen extends StatelessWidget {
   const NavbarScreen({super.key});
@@ -17,7 +17,7 @@ class NavbarScreen extends StatelessWidget {
   static const List<Widget> _screens = [
     HomeScreen(),
     MapRequestsScreen(),
-    ActivitiesTabScreen(),
+    CustomerHistoryScreen(),
     ProfileScreen(),
   ];
 

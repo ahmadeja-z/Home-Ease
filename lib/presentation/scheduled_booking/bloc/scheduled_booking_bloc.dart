@@ -29,6 +29,7 @@ class ScheduledBookingBloc
         )) {
     on<InitializeScheduledBookingForm>(_onInitForm);
     on<LoadScheduledBookingLocation>(_onLoadLocation);
+    on<ApplyPickedScheduledLocation>(_onApplyPickedLocation);
     on<UpdateScheduledBookingAddress>(_onUpdateAddress);
     on<UpdateScheduledBookingLocation>(_onUpdateLocation);
     on<UpdateScheduledBookingDate>(_onUpdateDate);
@@ -74,9 +75,17 @@ class ScheduledBookingBloc
     LoadScheduledBookingLocation event,
     Emitter<ScheduledBookingState> emit,
   ) async {
+    if (state.isLocationManuallySelected && !event.forceRefresh) {
+      return;
+    }
+
     emit(state.copyWith(
       locationLoading: true,
       clearError: true,
+      clearLocationError: true,
+      isUsingCurrentLocation: event.forceRefresh || !state.isLocationManuallySelected,
+      isLocationManuallySelected:
+          event.forceRefresh ? false : state.isLocationManuallySelected,
     ));
 
     try {
@@ -90,17 +99,36 @@ class ScheduledBookingBloc
 
       emit(state.copyWith(
         location: latLng,
-        address: address.isNotEmpty ? address : state.address,
+        address: address.isNotEmpty ? address : 'Selected Location',
         locationLoading: false,
+        isUsingCurrentLocation: true,
+        isLocationManuallySelected: false,
         status: ScheduledBookingUiStatus.formReady,
       ));
     } catch (e) {
       emit(state.copyWith(
         locationLoading: false,
+        locationError: e.toString(),
         status: ScheduledBookingUiStatus.formReady,
         errorMessage: e.toString(),
       ));
     }
+  }
+
+  void _onApplyPickedLocation(
+    ApplyPickedScheduledLocation event,
+    Emitter<ScheduledBookingState> emit,
+  ) {
+    emit(state.copyWith(
+      location: event.location,
+      address: event.address,
+      isLocationManuallySelected: true,
+      isUsingCurrentLocation: false,
+      locationLoading: false,
+      clearLocationError: true,
+      clearError: true,
+      status: ScheduledBookingUiStatus.formReady,
+    ));
   }
 
   void _onUpdateAddress(
@@ -179,11 +207,18 @@ class ScheduledBookingBloc
       return;
     }
 
+    if (state.location == null) {
+      emit(state.copyWith(
+        status: ScheduledBookingUiStatus.submitError,
+        errorMessage: 'Please select service location.',
+      ));
+      return;
+    }
+
     if (!state.canSubmit) {
       emit(state.copyWith(
         status: ScheduledBookingUiStatus.submitError,
-        errorMessage:
-            'Please select date, time, address, and location before submitting.',
+        errorMessage: 'Please select date and time before submitting.',
       ));
       return;
     }
@@ -231,12 +266,16 @@ class ScheduledBookingBloc
       final preferredTimeLabel =
           '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
 
+      final customerAddress = state.address.trim().isEmpty
+          ? 'Selected Location'
+          : state.address.trim();
+
       final booking = await repository.createScheduledBooking(
         service: service,
         scheduledDateTime: scheduledDateTime,
         preferredTimeLabel: preferredTimeLabel,
         customerLocation: state.location!,
-        customerAddress: state.address.trim(),
+        customerAddress: customerAddress,
         description: state.description,
         customerRequestImages: imageUrls,
       );
