@@ -96,25 +96,32 @@ class _ScheduledHistoryDetailsScreenState
       buildWhen: (p, c) =>
           p.selectedScheduledRequest != c.selectedScheduledRequest ||
           p.status != c.status ||
+          p.errorMessage != c.errorMessage ||
           p.isPayingInvoice != c.isPayingInvoice ||
           p.isCancellingScheduled != c.isCancellingScheduled ||
           p.countdownRemaining != c.countdownRemaining ||
           p.showWorkerNotStartedHint != c.showWorkerNotStartedHint,
       builder: (context, state) {
-        if (state.isDetailsLoading && state.selectedScheduledRequest == null) {
+        final request = state.selectedScheduledRequest;
+        final isTargetLoaded =
+            request != null && request.id == widget.requestId;
+
+        if (!isTargetLoaded) {
+          final showError = !state.isDetailsLoading &&
+              state.status == CustomerHistoryStatus.error;
+
+          if (showError) {
+            return _ErrorScreen(
+              message: state.errorMessage ?? 'Unable to load request',
+              onRetry: () => context
+                  .read<CustomerHistoryBloc>()
+                  .add(LoadScheduledRequestDetails(widget.requestId)),
+            );
+          }
+
           return const Scaffold(
             appBar: CustomAppBar(title: 'Request details'),
             body: Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        final request = state.selectedScheduledRequest;
-        if (request == null || request.id != widget.requestId) {
-          return _ErrorScreen(
-            message: state.errorMessage ?? 'Unable to load request',
-            onRetry: () => context
-                .read<CustomerHistoryBloc>()
-                .add(LoadScheduledRequestDetails(widget.requestId)),
           );
         }
 
@@ -425,120 +432,18 @@ class _ScheduledHistoryDetailsScreenState
   }
 
   Future<void> _showCancelDialog(BuildContext context, String requestId) async {
-    final cs = Theme.of(context).colorScheme;
-    final reasonController = TextEditingController();
-
-    final confirmed = await showDialog<bool>(
+    final reason = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: cs.error.withValues(alpha:0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(Icons.cancel_outlined,
-                        color: cs.error, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Cancel request',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: cs.onSurface,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Please tell us why you are cancelling. This helps our team improve service quality.',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: cs.onSurface.withValues(alpha:0.6),
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: reasonController,
-                maxLines: 3,
-                style: TextStyle(fontSize: 14, color: cs.onSurface),
-                decoration: InputDecoration(
-                  hintText: 'Reason for cancellation…',
-                  hintStyle: TextStyle(
-                    color: cs.onSurface.withValues(alpha:0.35),
-                    fontSize: 13,
-                  ),
-                  filled: true,
-                  fillColor: cs.surfaceContainerHighest.withValues(alpha:0.4),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.all(14),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(dialogContext, false),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                        side: BorderSide(
-                            color: cs.outline.withValues(alpha:0.3)),
-                      ),
-                      child: const Text('Keep request'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: () {
-                        if (reasonController.text.trim().isEmpty) return;
-                        Navigator.pop(dialogContext, true);
-                      },
-                      style: FilledButton.styleFrom(
-                        backgroundColor: cs.error,
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: const Text('Cancel'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+      barrierDismissible: true,
+      builder: (_) => const _CancelScheduledDialog(),
     );
 
-    final reason = reasonController.text.trim();
-    reasonController.dispose();
+    if (reason == null || reason.isEmpty) return;
 
-    if (confirmed == true && reason.isNotEmpty) {
-      _cancelPending = true;
-      _historyBloc.add(
-        CancelScheduledRequest(requestId: requestId, reason: reason),
-      );
-    }
+    _cancelPending = true;
+    _historyBloc.add(
+      CancelScheduledRequest(requestId: requestId, reason: reason),
+    );
   }
 
   void _confirmPayment(BuildContext context, String id) {
@@ -615,6 +520,141 @@ class _ScheduledHistoryDetailsScreenState
                             borderRadius: BorderRadius.circular(12)),
                       ),
                       child: const Text('Confirm paid'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Cancellation dialog — owns [TextEditingController] for the route lifecycle.
+class _CancelScheduledDialog extends StatefulWidget {
+  const _CancelScheduledDialog();
+
+  @override
+  State<_CancelScheduledDialog> createState() => _CancelScheduledDialogState();
+}
+
+class _CancelScheduledDialogState extends State<_CancelScheduledDialog> {
+  final _reasonController = TextEditingController();
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final reason = _reasonController.text.trim();
+    if (reason.isEmpty) return;
+    Navigator.of(context).pop(reason);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: cs.error.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.cancel_outlined,
+                      color: cs.error,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Cancel request',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Please tell us why you are cancelling. This helps our team improve service quality.',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: cs.onSurface.withValues(alpha: 0.6),
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _reasonController,
+                maxLines: 3,
+                style: TextStyle(fontSize: 14, color: cs.onSurface),
+                decoration: InputDecoration(
+                  hintText: 'Reason for cancellation…',
+                  hintStyle: TextStyle(
+                    color: cs.onSurface.withValues(alpha: 0.35),
+                    fontSize: 13,
+                  ),
+                  filled: true,
+                  fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.4),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.all(14),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        side: BorderSide(
+                          color: cs.outline.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: const Text('Keep request'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _submit,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: cs.error,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Cancel'),
                     ),
                   ),
                 ],

@@ -413,6 +413,7 @@ class CustomerHistoryBloc
   ) async {
     emit(state.copyWith(
       status: CustomerHistoryStatus.detailsLoading,
+      clearSelectedOrder: true,
       clearError: true,
     ));
 
@@ -454,9 +455,14 @@ class CustomerHistoryBloc
     LoadScheduledHistoryDetails event,
     Emitter<CustomerHistoryState> emit,
   ) async {
+    _countdownTimer?.cancel();
     emit(state.copyWith(
       status: CustomerHistoryStatus.detailsLoading,
+      clearSelectedScheduled: true,
       clearError: true,
+      clearWatching: true,
+      clearCountdown: true,
+      showWorkerNotStartedHint: false,
     ));
 
     try {
@@ -471,6 +477,7 @@ class CustomerHistoryBloc
     } catch (e) {
       emit(state.copyWith(
         status: CustomerHistoryStatus.error,
+        clearSelectedScheduled: true,
         errorMessage: e.toString(),
       ));
     }

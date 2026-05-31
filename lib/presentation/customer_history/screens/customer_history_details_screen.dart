@@ -44,19 +44,22 @@ class CustomerHistoryDetailsScreen extends StatelessWidget {
         buildWhen: (p, c) =>
             p.selectedOrder != c.selectedOrder || p.status != c.status,
         builder: (context, state) {
-          // ── Loading ──────────────────────────────────────────────────
-          if (state.isDetailsLoading && state.selectedOrder == null) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          // ── Error / empty ────────────────────────────────────────────
           final order = state.selectedOrder;
-          if (order == null || order.id != requestId) {
-            return _ErrorView(
-              onRetry: () => context
-                  .read<CustomerHistoryBloc>()
-                  .add(LoadCustomerHistoryDetails(requestId)),
-            );
+          final isTargetLoaded = order != null && order.id == requestId;
+
+          if (!isTargetLoaded) {
+            final showError = !state.isDetailsLoading &&
+                state.status == CustomerHistoryStatus.error;
+
+            if (showError) {
+              return _ErrorView(
+                onRetry: () => context
+                    .read<CustomerHistoryBloc>()
+                    .add(LoadCustomerHistoryDetails(requestId)),
+              );
+            }
+
+            return const Center(child: CircularProgressIndicator());
           }
 
           return SingleChildScrollView(
@@ -195,154 +198,189 @@ class CustomerHistoryDetailsScreen extends StatelessWidget {
   }
 
   Future<void> _showReviewDialog(
-      BuildContext context, String requestId) async {
-    var rating = 0;
-    final reviewController = TextEditingController();
-    final cs = Theme.of(context).colorScheme;
-
-    final submitted = await showDialog<bool>(
+    BuildContext context,
+    String requestId,
+  ) async {
+    final submission = await showDialog<_ReviewSubmission>(
       context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (ctx, setState) {
-            return Dialog(
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20)),
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: cs.tertiaryContainer,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(Icons.star_outline_rounded,
-                              color: cs.onTertiaryContainer, size: 20),
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Rate your experience',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            color: cs.onSurface,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    // Star row
-                    Center(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(5, (i) {
-                          final star = i + 1;
-                          return GestureDetector(
-                            onTap: () => setState(() => rating = star),
-                            child: Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 4),
-                              child: Icon(
-                                star <= rating
-                                    ? Icons.star_rounded
-                                    : Icons.star_outline_rounded,
-                                color: star <= rating
-                                    ? cs.tertiary
-                                    : cs.onSurface.withValues(alpha: 0.2),
-                                size: 36,
-                              ),
-                            ),
-                          );
-                        }),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: reviewController,
-                      maxLines: 3,
-                      style:
-                          TextStyle(fontSize: 14, color: cs.onSurface),
-                      decoration: InputDecoration(
-                        hintText: 'Share your experience (optional)…',
-                        hintStyle: TextStyle(
-                          color: cs.onSurface.withValues(alpha: 0.35),
-                          fontSize: 13,
-                        ),
-                        filled: true,
-                        fillColor: cs.surfaceContainerHighest
-                            .withValues(alpha: 0.4),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.all(14),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () =>
-                                Navigator.pop(dialogContext, false),
-                            style: OutlinedButton.styleFrom(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 13),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12)),
-                              side: BorderSide(
-                                  color: cs.outline.withValues(alpha: 0.3)),
-                            ),
-                            child: const Text('Cancel'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: rating < 1
-                                ? null
-                                : () =>
-                                    Navigator.pop(dialogContext, true),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: cs.primary,
-                              disabledBackgroundColor:
-                                  cs.onSurface.withValues(alpha: 0.12),
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 13),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12)),
-                            ),
-                            child: const Text('Submit'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+      barrierDismissible: true,
+      builder: (_) => const _ReviewDialog(),
     );
 
-    if (submitted == true && context.mounted) {
-      context.read<CustomerHistoryBloc>().add(
-            SubmitCustomerReview(
-              requestId: requestId,
-              rating: rating.toDouble(),
-              review: reviewController.text.trim(),
-            ),
-          );
-    }
-    reviewController.dispose();
+    if (submission == null || !context.mounted) return;
+
+    context.read<CustomerHistoryBloc>().add(
+          SubmitCustomerReview(
+            requestId: requestId,
+            rating: submission.rating,
+            review: submission.review,
+          ),
+        );
+  }
+}
+
+class _ReviewSubmission {
+  const _ReviewSubmission({required this.rating, required this.review});
+
+  final double rating;
+  final String review;
+}
+
+/// Owns [TextEditingController] for the dialog route lifecycle (avoids dispose-during-exit).
+class _ReviewDialog extends StatefulWidget {
+  const _ReviewDialog();
+
+  @override
+  State<_ReviewDialog> createState() => _ReviewDialogState();
+}
+
+class _ReviewDialogState extends State<_ReviewDialog> {
+  final _reviewController = TextEditingController();
+  int _rating = 0;
+
+  @override
+  void dispose() {
+    _reviewController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_rating < 1) return;
+    Navigator.of(context).pop(
+      _ReviewSubmission(
+        rating: _rating.toDouble(),
+        review: _reviewController.text.trim(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: cs.tertiaryContainer,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.star_outline_rounded,
+                      color: cs.onTertiaryContainer,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Rate your experience',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Center(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (i) {
+                    final star = i + 1;
+                    return GestureDetector(
+                      onTap: () => setState(() => _rating = star),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Icon(
+                          star <= _rating
+                              ? Icons.star_rounded
+                              : Icons.star_outline_rounded,
+                          color: star <= _rating
+                              ? cs.tertiary
+                              : cs.onSurface.withValues(alpha: 0.2),
+                          size: 36,
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _reviewController,
+                maxLines: 3,
+                style: TextStyle(fontSize: 14, color: cs.onSurface),
+                decoration: InputDecoration(
+                  hintText: 'Share your experience (optional)…',
+                  hintStyle: TextStyle(
+                    color: cs.onSurface.withValues(alpha: 0.35),
+                    fontSize: 13,
+                  ),
+                  filled: true,
+                  fillColor:
+                      cs.surfaceContainerHighest.withValues(alpha: 0.4),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.all(14),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        side: BorderSide(
+                          color: cs.outline.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _rating < 1 ? null : _submit,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: cs.primary,
+                        disabledBackgroundColor:
+                            cs.onSurface.withValues(alpha: 0.12),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Submit'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
