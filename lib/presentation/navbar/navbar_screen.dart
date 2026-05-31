@@ -157,7 +157,7 @@ class PremiumNavBar extends StatelessWidget {
     _NavItem(
       icon: Icons.timeline_outlined,
       activeIcon: Icons.timeline_rounded,
-      label: 'Activities',
+      label: 'History',
     ),
     _NavItem(
       icon: Icons.person_outline_rounded,
