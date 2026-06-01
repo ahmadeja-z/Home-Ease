@@ -12,6 +12,7 @@ import 'package:homeease/models/service_request_model.dart';
 import 'package:homeease/presentation/map_requests/bloc/map_requests_event.dart';
 import 'package:homeease/presentation/map_requests/bloc/map_requests_state.dart';
 import 'package:homeease/repositories/map_requests_repository.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class MapRequestsBloc
     extends Bloc<MapRequestsEvent, MapRequestsState> {
@@ -26,6 +27,7 @@ class MapRequestsBloc
   String? _currentBroadcastRequestId;
   String? _listeningOffersRequestId;
   String? _dismissedCompletedRequestId;
+  bool _isCancelling = false;
 
   MapRequestsBloc({required this.repository})
       : super(const MapRequestsState()) {
@@ -37,6 +39,11 @@ class MapRequestsBloc
     on<WorkerOffersUpdatedEvent>(_onWorkerOffersUpdated);
     on<AcceptWorkerOfferEvent>(_onAcceptWorkerOffer);
     on<PayInvoiceEvent>(_onPayInvoice);
+    on<PayInvoiceRequested>(_onPayInvoiceRequested);
+    on<LoadActiveRequestById>(_onLoadActiveRequestById);
+    on<ActiveRequestRealtimeUpdated>(_onActiveRequestRealtimeUpdated);
+    on<OpenInvoiceRequested>(_onOpenInvoiceRequested);
+    on<CloseInvoiceDialog>(_onCloseInvoiceDialog);
     on<ClearActiveRequestEvent>(_onClearActiveRequest);
     on<ReloadMapAfterCompletionEvent>(_onReloadAfterCompletion);
     on<WorkerAcceptedRequestEvent>(_onWorkerAcceptedRequest);
@@ -335,8 +342,7 @@ class MapRequestsBloc
         print('MapRequestsBloc - customer accepted offer: ${event.offerId}');
       }
 
-      await _offersSubscription?.cancel();
-      _listeningOffersRequestId = null;
+      await _disposeOfferSubscription();
 
       emit(state.copyWith(
         status: MapRequestStatus.workerAssigned,
@@ -381,8 +387,7 @@ class MapRequestsBloc
       _dismissedCompletedRequestId = completedId;
     }
     _cancelBroadcastSubscription();
-    _offersSubscription?.cancel();
-    _listeningOffersRequestId = null;
+    unawaited(_disposeOfferSubscription());
     emit(state.copyWith(
       status: MapRequestStatus.workersLoaded,
       clearActiveRequest: true,
@@ -391,6 +396,11 @@ class MapRequestsBloc
       activeWorkerHeading: 0,
       workerMarkers: _buildWorkerMarkers(workers: state.nearbyWorkers),
       errorMessage: null,
+      clearShowInvoiceDialog: true,
+      invoiceDialogShown: false,
+      isInvoiceOpening: false,
+      isPayingInvoice: false,
+      clearLastAutoShownBillGeneratedAt: true,
     ));
   }
 
@@ -398,6 +408,15 @@ class MapRequestsBloc
     PayInvoiceEvent event,
     Emitter<MapRequestsState> emit,
   ) async {
+    add(PayInvoiceRequested(event.requestId));
+  }
+
+  Future<void> _onPayInvoiceRequested(
+    PayInvoiceRequested event,
+    Emitter<MapRequestsState> emit,
+  ) async {
+    if (state.isPayingInvoice) return;
+
     final active = state.activeRequest;
     if (active == null || !active.canCustomerConfirmPayment) {
       if (kDebugMode) {
@@ -411,11 +430,13 @@ class MapRequestsBloc
     }
 
     if (kDebugMode) {
-      print('MapRequestsBloc - customer confirmed paid worker: ${event.requestId}');
+      print(
+        'MapRequestsBloc - customer confirmed paid worker: ${event.requestId}',
+      );
     }
 
     emit(state.copyWith(
-      status: MapRequestStatus.paymentProcessing,
+      isPayingInvoice: true,
       errorMessage: null,
     ));
 
@@ -427,23 +448,122 @@ class MapRequestsBloc
       }
 
       emit(state.copyWith(
-        status: MapRequestStatus.paymentSuccess,
+        isPayingInvoice: false,
+        clearShowInvoiceDialog: true,
+        invoiceDialogShown: true,
         activeRequest: request,
-      ));
-
-      emit(state.copyWith(
         status: MapRequestStatus.completed,
-        activeRequest: request,
       ));
     } catch (e) {
       if (kDebugMode) {
         print('MapRequestsBloc - payment failed: ${event.requestId} — $e');
       }
       emit(state.copyWith(
+        isPayingInvoice: false,
         status: MapRequestStatus.paymentError,
         errorMessage: _paymentErrorMessage(e),
       ));
     }
+  }
+
+  Future<void> _onLoadActiveRequestById(
+    LoadActiveRequestById event,
+    Emitter<MapRequestsState> emit,
+  ) async {
+    final userId = repository.supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    try {
+      final ServiceRequestModel? request;
+      if (event.requestId != null) {
+        request = await repository.fetchRequestById(event.requestId!);
+      } else {
+        request = await repository.fetchActiveInstantRequest(userId);
+      }
+
+      if (request == null) return;
+
+      _ensureRequestSideEffects(request);
+      emit(_applyActiveRequestUpdate(state, request, autoOpenInvoice: false));
+    } catch (e) {
+      if (kDebugMode) {
+        print('MapRequestsBloc - LoadActiveRequestById failed: $e');
+      }
+    }
+  }
+
+  Future<void> _onOpenInvoiceRequested(
+    OpenInvoiceRequested event,
+    Emitter<MapRequestsState> emit,
+  ) async {
+    if (state.isInvoiceOpening) return;
+
+    final requestId = event.requestId ?? state.activeRequest?.id;
+    if (requestId == null) return;
+
+    emit(state.copyWith(isInvoiceOpening: true, errorMessage: null));
+
+    try {
+      final request = await repository.fetchRequestById(requestId);
+
+      if (!request.canCustomerConfirmPayment) {
+        final nextStatus = request.status == RequestStatus.completed &&
+                request.paymentStatus == PaymentStatus.paid
+            ? MapRequestStatus.completed
+            : _getStatusFromRequest(request);
+
+        emit(state.copyWith(
+          isInvoiceOpening: false,
+          activeRequest: request,
+          status: nextStatus,
+          clearShowInvoiceDialog: true,
+          errorMessage: request.status == RequestStatus.completed
+              ? 'This invoice has already been paid.'
+              : 'Invoice is not available for payment.',
+        ));
+        return;
+      }
+
+      emit(state.copyWith(
+        isInvoiceOpening: false,
+        activeRequest: request,
+        status: MapRequestStatus.billGenerated,
+        showInvoiceDialog: true,
+        invoiceDialogShown: true,
+        invoicePresentationToken: state.invoicePresentationToken + 1,
+        lastAutoShownBillGeneratedAt:
+            request.billGeneratedAt ?? state.lastAutoShownBillGeneratedAt,
+      ));
+    } catch (e) {
+      if (kDebugMode) {
+        print('MapRequestsBloc - OpenInvoiceRequested failed: $e');
+      }
+      emit(state.copyWith(
+        isInvoiceOpening: false,
+        errorMessage:
+            'Could not load invoice. Check your connection and try again.',
+      ));
+    }
+  }
+
+  void _onCloseInvoiceDialog(
+    CloseInvoiceDialog event,
+    Emitter<MapRequestsState> emit,
+  ) {
+    emit(state.copyWith(
+      clearShowInvoiceDialog: true,
+      invoiceDialogShown: true,
+      lastAutoShownBillGeneratedAt:
+          state.activeRequest?.billGeneratedAt ?? state.lastAutoShownBillGeneratedAt,
+    ));
+  }
+
+  void _onActiveRequestRealtimeUpdated(
+    ActiveRequestRealtimeUpdated event,
+    Emitter<MapRequestsState> emit,
+  ) {
+    _ensureRequestSideEffects(event.request);
+    emit(_applyActiveRequestUpdate(state, event.request, autoOpenInvoice: true));
   }
 
   String _paymentErrorMessage(Object error) {
@@ -529,30 +649,124 @@ class MapRequestsBloc
     CancelJobEvent event,
     Emitter<MapRequestsState> emit,
   ) async {
+    if (_isCancelling) return;
+
+    final active = state.activeRequest;
+    if (active == null) return;
+
+    if (active.status != RequestStatus.pending) {
+      emit(state.copyWith(
+        errorMessage:
+            'Worker already assigned. Please cancel from active request flow.',
+      ));
+      return;
+    }
+
+    final customerId = repository.supabase.auth.currentUser?.id;
+    if (customerId == null) {
+      emit(state.copyWith(
+        status: MapRequestStatus.error,
+        errorMessage: 'Please sign in again to cancel this request.',
+      ));
+      return;
+    }
+
+    if (kDebugMode) {
+      print('MapRequestsBloc - cancel request clicked: ${event.requestId}');
+    }
+
+    _isCancelling = true;
+    emit(state.copyWith(
+      status: MapRequestStatus.cancellingRequest,
+      errorMessage: null,
+    ));
+
     try {
-      await repository.cancelJob(
+      final result = await repository.customerCancelInstantRequest(
         requestId: event.requestId,
+        customerId: customerId,
         reason: event.reason,
       );
 
+      if (kDebugMode) {
+        print('MapRequestsBloc - cancel RPC success: ${result.requestId}');
+        print(
+          'MapRequestsBloc - offers expired/customer_cancelled count: '
+          '${result.offersCancelledCount}',
+        );
+      }
+
+      await _disposeOfferSubscription();
       _cancelBroadcastSubscription();
-      await _offersSubscription?.cancel();
-      _listeningOffersRequestId = null;
 
       emit(state.copyWith(
-        status: MapRequestStatus.jobCompleted,
-        activeRequest: null,
-        clearActiveRequest: true,
+        status: MapRequestStatus.requestCancelled,
+        activeRequest: active.copyWith(
+          status: RequestStatus.cancelled,
+          cancellationReason: event.reason,
+        ),
         clearWorkerOffers: true,
         activeWorkerLocation: null,
         activeWorkerHeading: 0,
         workerMarkers: _buildWorkerMarkers(workers: state.nearbyWorkers),
       ));
+    } on PostgrestException catch (e) {
+      final message = _cancelErrorMessage(e);
+      if (message.contains('already cancelled')) {
+        await _disposeOfferSubscription();
+        _cancelBroadcastSubscription();
+        emit(state.copyWith(
+          status: MapRequestStatus.requestCancelled,
+          activeRequest: active.copyWith(status: RequestStatus.cancelled),
+          clearWorkerOffers: true,
+          activeWorkerLocation: null,
+          activeWorkerHeading: 0,
+          workerMarkers: _buildWorkerMarkers(workers: state.nearbyWorkers),
+        ));
+        return;
+      }
+      emit(state.copyWith(
+        status: state.workerOffers.isNotEmpty
+            ? MapRequestStatus.workerOffersReceived
+            : MapRequestStatus.waitingForOffers,
+        errorMessage: message,
+      ));
     } catch (e) {
       emit(state.copyWith(
-        status: MapRequestStatus.error,
-        errorMessage: e.toString(),
+        status: state.workerOffers.isNotEmpty
+            ? MapRequestStatus.workerOffersReceived
+            : MapRequestStatus.waitingForOffers,
+        errorMessage: 'Could not cancel request. Check your connection and try again.',
       ));
+    } finally {
+      _isCancelling = false;
+    }
+  }
+
+  String _cancelErrorMessage(PostgrestException error) {
+    final message = error.message;
+    if (message.contains('worker_already_assigned')) {
+      return 'Worker already assigned. Please cancel from active request flow.';
+    }
+    if (message.contains('request_already_cancelled')) {
+      return 'This request was already cancelled.';
+    }
+    if (message.contains('request_not_cancellable') ||
+        message.contains('invalid_request')) {
+      return 'This request can no longer be cancelled.';
+    }
+    if (message.contains('not_authenticated')) {
+      return 'Please sign in again to cancel this request.';
+    }
+    return 'Could not cancel request. Please try again.';
+  }
+
+  Future<void> _disposeOfferSubscription() async {
+    await _offersSubscription?.cancel();
+    _offersSubscription = null;
+    _listeningOffersRequestId = null;
+    if (kDebugMode) {
+      print('MapRequestsBloc - offer subscription disposed');
     }
   }
 
@@ -587,91 +801,168 @@ class MapRequestsBloc
     final userId = repository.supabase.auth.currentUser?.id;
     if (userId == null) return;
 
-    await emit.forEach<ServiceRequestModel?>(
-      repository.subscribeToCustomerRequestUpdates(userId),
-      onData: (request) {
-        if (request == null) {
-          _cancelBroadcastSubscription();
-          _offersSubscription?.cancel();
-          _listeningOffersRequestId = null;
-          return state.copyWith(
-            activeRequest: null,
-            clearActiveRequest: true,
-            clearWorkerOffers: true,
-            activeWorkerLocation: null,
-            activeWorkerHeading: 0,
-            workerMarkers: _buildWorkerMarkers(workers: state.nearbyWorkers),
-            status: MapRequestStatus.workersLoaded,
-          );
-        }
-
-        if (request.id == _dismissedCompletedRequestId &&
-            request.status == RequestStatus.completed) {
-          return state.copyWith(
-            activeRequest: null,
-            clearActiveRequest: true,
-            status: MapRequestStatus.workersLoaded,
-            workerMarkers: _buildWorkerMarkers(workers: state.nearbyWorkers),
-          );
-        }
-
-        if (request.status != RequestStatus.completed) {
-          _dismissedCompletedRequestId = null;
-        }
-
-        if (request.status == RequestStatus.pending &&
-            _listeningOffersRequestId != request.id) {
-          add(ListenWorkerOffersEvent(request.id));
-        }
-
-        if (_currentBroadcastRequestId != request.id) {
-          _cancelBroadcastSubscription();
-          _currentBroadcastRequestId = request.id;
-          _broadcastSubscription = repository
-              .listenWorkerLocationBroadcast(request.id)
-              .listen((location) {
-            add(UpdateWorkerLocationBroadcastEvent(location));
-          });
-        }
-
-        LatLng? newLocation;
-        double newHeading = state.activeWorkerHeading;
-
-        if (request.workerInfo?.location != null) {
-          newLocation = request.workerInfo!.location!;
-
-          if (state.activeWorkerLocation != null) {
-            newHeading = _computeHeading(state.activeWorkerLocation!, newLocation);
-          }
-        }
-
-        final preservePaymentUi = state.status == MapRequestStatus.paymentProcessing;
-
-        return state.copyWith(
-          activeRequest: request,
-          status: preservePaymentUi
-              ? MapRequestStatus.paymentProcessing
-              : _getStatusFromRequest(request),
-          workerMarkers: _buildWorkerMarkers(
-            workers: state.nearbyWorkers,
-            activeRequest: request,
-            activeWorkerLocation: newLocation,
-            activeWorkerHeading: newHeading,
-          ),
-          activeWorkerLocation: newLocation,
-          activeWorkerHeading: newHeading,
-        );
-      },
-      onError: (error, stackTrace) {
+    await _activeRequestSubscription?.cancel();
+    _activeRequestSubscription =
+        repository.subscribeToCustomerRequestUpdates(userId).listen(
+      (request) => add(ActiveRequestRealtimeUpdated(request)),
+      onError: (Object error) {
         if (kDebugMode) {
-          print('Error in _onListenActiveRequest stream: $error');
+          print('MapRequestsBloc - listenActiveRequest error: $error');
         }
-        return state.copyWith(
-          activeRequest: null,
-          clearActiveRequest: true,
-        );
       },
     );
+  }
+
+  void _ensureRequestSideEffects(ServiceRequestModel? request) {
+    if (request == null) return;
+
+    if (request.status == RequestStatus.pending &&
+        _listeningOffersRequestId != request.id) {
+      add(ListenWorkerOffersEvent(request.id));
+    }
+
+    if (_currentBroadcastRequestId != request.id) {
+      _cancelBroadcastSubscription();
+      _currentBroadcastRequestId = request.id;
+      _broadcastSubscription = repository
+          .listenWorkerLocationBroadcast(request.id)
+          .listen((location) {
+        add(UpdateWorkerLocationBroadcastEvent(location));
+      });
+    }
+  }
+
+  MapRequestsState _applyActiveRequestUpdate(
+    MapRequestsState current,
+    ServiceRequestModel? request, {
+    required bool autoOpenInvoice,
+  }) {
+    if (request == null) {
+      _cancelBroadcastSubscription();
+
+      if (current.status == MapRequestStatus.requestCancelled ||
+          current.activeRequest?.status == RequestStatus.cancelled) {
+        return current;
+      }
+
+      final wasPending = current.activeRequest?.status == RequestStatus.pending;
+      if (wasPending) {
+        if (kDebugMode) {
+          print('MapRequestsBloc - realtime request cancelled received');
+        }
+        unawaited(_disposeOfferSubscription());
+        return current.copyWith(
+          status: MapRequestStatus.requestCancelled,
+          activeRequest: current.activeRequest?.copyWith(
+            status: RequestStatus.cancelled,
+          ),
+          clearWorkerOffers: true,
+          activeWorkerLocation: null,
+          activeWorkerHeading: 0,
+          workerMarkers: _buildWorkerMarkers(workers: current.nearbyWorkers),
+          clearShowInvoiceDialog: true,
+        );
+      }
+      unawaited(_disposeOfferSubscription());
+      return current.copyWith(
+        activeRequest: null,
+        clearActiveRequest: true,
+        clearWorkerOffers: true,
+        activeWorkerLocation: null,
+        activeWorkerHeading: 0,
+        workerMarkers: _buildWorkerMarkers(workers: current.nearbyWorkers),
+        status: MapRequestStatus.workersLoaded,
+        clearShowInvoiceDialog: true,
+      );
+    }
+
+    if (request.id == _dismissedCompletedRequestId &&
+        request.status == RequestStatus.completed) {
+      return current.copyWith(
+        activeRequest: null,
+        clearActiveRequest: true,
+        status: MapRequestStatus.workersLoaded,
+        workerMarkers: _buildWorkerMarkers(workers: current.nearbyWorkers),
+        clearShowInvoiceDialog: true,
+      );
+    }
+
+    if (request.status != RequestStatus.completed) {
+      _dismissedCompletedRequestId = null;
+    }
+
+    if (request.status == RequestStatus.cancelled ||
+        request.status == RequestStatus.rejected) {
+      if (kDebugMode) {
+        print('MapRequestsBloc - realtime request cancelled received');
+      }
+      unawaited(_disposeOfferSubscription());
+      return current.copyWith(
+        status: MapRequestStatus.requestCancelled,
+        activeRequest: request,
+        clearWorkerOffers: true,
+        activeWorkerLocation: null,
+        activeWorkerHeading: 0,
+        workerMarkers: _buildWorkerMarkers(workers: current.nearbyWorkers),
+        clearShowInvoiceDialog: true,
+      );
+    }
+
+    LatLng? newLocation;
+    double newHeading = current.activeWorkerHeading;
+
+    if (request.workerInfo?.location != null) {
+      newLocation = request.workerInfo!.location!;
+
+      if (current.activeWorkerLocation != null) {
+        newHeading =
+            _computeHeading(current.activeWorkerLocation!, newLocation);
+      }
+    }
+
+    final paidElsewhere = request.status == RequestStatus.completed &&
+        request.paymentStatus == PaymentStatus.paid;
+
+    final preservePaying = current.isPayingInvoice;
+
+    var next = current.copyWith(
+      activeRequest: request,
+      status: preservePaying
+          ? current.status
+          : paidElsewhere
+              ? MapRequestStatus.completed
+              : _getStatusFromRequest(request),
+      workerMarkers: _buildWorkerMarkers(
+        workers: current.nearbyWorkers,
+        activeRequest: request,
+        activeWorkerLocation: newLocation,
+        activeWorkerHeading: newHeading,
+      ),
+      activeWorkerLocation: newLocation,
+      activeWorkerHeading: newHeading,
+      clearShowInvoiceDialog: paidElsewhere,
+    );
+
+    if (autoOpenInvoice &&
+        request.canCustomerConfirmPayment &&
+        request.billGeneratedAt != null &&
+        request.billGeneratedAt != current.lastAutoShownBillGeneratedAt &&
+        !current.showInvoiceDialog) {
+      if (kDebugMode) {
+        print(
+          'MapRequestsBloc - auto-opening invoice: ${request.id} '
+          'billGeneratedAt=${request.billGeneratedAt}',
+        );
+      }
+      next = next.copyWith(
+        showInvoiceDialog: true,
+        invoiceDialogShown: true,
+        invoicePresentationToken: current.invoicePresentationToken + 1,
+        lastAutoShownBillGeneratedAt: request.billGeneratedAt,
+      );
+    }
+
+    return next;
   }
 
   void _cancelBroadcastSubscription() {
@@ -903,7 +1194,7 @@ class MapRequestsBloc
         return MapRequestStatus.completed;
       case RequestStatus.cancelled:
       case RequestStatus.rejected:
-        return MapRequestStatus.jobCompleted;
+        return MapRequestStatus.requestCancelled;
       case RequestStatus.approved:
       case RequestStatus.assigned:
       case RequestStatus.workSubmitted:

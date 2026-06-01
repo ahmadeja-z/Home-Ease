@@ -113,6 +113,48 @@ class PayInvoiceEvent extends MapRequestsEvent {
   List<Object?> get props => [requestId];
 }
 
+/// Fetches the latest active instant request (or a specific id) from Supabase.
+class LoadActiveRequestById extends MapRequestsEvent {
+  final String? requestId;
+
+  const LoadActiveRequestById({this.requestId});
+
+  @override
+  List<Object?> get props => [requestId];
+}
+
+class ActiveRequestRealtimeUpdated extends MapRequestsEvent {
+  final ServiceRequestModel? request;
+
+  const ActiveRequestRealtimeUpdated(this.request);
+
+  @override
+  List<Object?> get props => [request];
+}
+
+/// Refetches invoice data and opens the invoice dialog.
+class OpenInvoiceRequested extends MapRequestsEvent {
+  final String? requestId;
+
+  const OpenInvoiceRequested({this.requestId});
+
+  @override
+  List<Object?> get props => [requestId];
+}
+
+class CloseInvoiceDialog extends MapRequestsEvent {
+  const CloseInvoiceDialog();
+}
+
+class PayInvoiceRequested extends MapRequestsEvent {
+  final String requestId;
+
+  const PayInvoiceRequested(this.requestId);
+
+  @override
+  List<Object?> get props => [requestId];
+}
+
 class ClearActiveRequestEvent extends MapRequestsEvent {}
 
 /// Clears completed job UI, refreshes map workers, and allows a new request.

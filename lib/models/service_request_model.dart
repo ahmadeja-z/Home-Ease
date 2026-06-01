@@ -109,6 +109,8 @@ class ServiceRequestModel {
   final PaymentMethod? paymentMethod;
   final double? customerPaidAmount;
   final DateTime? customerPaidAt;
+  final double? commissionPercentage;
+  final double? commissionBaseAmount;
   final double? platformCommission;
   final double? workerEarning;
   final CommissionStatus commissionStatus;
@@ -160,17 +162,22 @@ class ServiceRequestModel {
     this.paymentMethod,
     this.customerPaidAmount,
     this.customerPaidAt,
+    this.commissionPercentage,
+    this.commissionBaseAmount,
     this.platformCommission,
     this.workerEarning,
     this.commissionStatus = CommissionStatus.none,
     this.workerInfo,
   });
 
+  /// Bill issued and awaiting customer payment.
+  bool get hasPendingInvoice =>
+      status == RequestStatus.billGenerated &&
+      paymentStatus == PaymentStatus.unpaid;
+
   /// Customer may confirm direct payment to worker (outside app gateway).
   bool get canCustomerConfirmPayment =>
-      status == RequestStatus.billGenerated &&
-      paymentStatus == PaymentStatus.unpaid &&
-      finalAmount > 0;
+      hasPendingInvoice && finalAmount > 0;
 
   factory ServiceRequestModel.fromJson(Map<String, dynamic> json) {
     return ServiceRequestModel(
@@ -233,6 +240,10 @@ class ServiceRequestModel {
       paymentMethod: _parsePaymentMethod(json['payment_method'] as String?),
       customerPaidAmount: (json['customer_paid_amount'] as num?)?.toDouble(),
       customerPaidAt: _parseDateTime(json['customer_paid_at']),
+      commissionPercentage:
+          (json['commission_percentage'] as num?)?.toDouble(),
+      commissionBaseAmount:
+          (json['commission_base_amount'] as num?)?.toDouble(),
       platformCommission: (json['platform_commission'] as num?)?.toDouble(),
       workerEarning: (json['worker_earning'] as num?)?.toDouble(),
       commissionStatus:
@@ -291,6 +302,8 @@ class ServiceRequestModel {
       'payment_method': paymentMethod?.value,
       'customer_paid_amount': customerPaidAmount,
       'customer_paid_at': customerPaidAt?.toIso8601String(),
+      'commission_percentage': commissionPercentage,
+      'commission_base_amount': commissionBaseAmount,
       'platform_commission': platformCommission,
       'worker_earning': workerEarning,
       'commission_status': commissionStatus.value,
@@ -343,6 +356,8 @@ class ServiceRequestModel {
     PaymentMethod? paymentMethod,
     double? customerPaidAmount,
     DateTime? customerPaidAt,
+    double? commissionPercentage,
+    double? commissionBaseAmount,
     double? platformCommission,
     double? workerEarning,
     CommissionStatus? commissionStatus,
@@ -394,6 +409,8 @@ class ServiceRequestModel {
       paymentMethod: paymentMethod ?? this.paymentMethod,
       customerPaidAmount: customerPaidAmount ?? this.customerPaidAmount,
       customerPaidAt: customerPaidAt ?? this.customerPaidAt,
+      commissionPercentage: commissionPercentage ?? this.commissionPercentage,
+      commissionBaseAmount: commissionBaseAmount ?? this.commissionBaseAmount,
       platformCommission: platformCommission ?? this.platformCommission,
       workerEarning: workerEarning ?? this.workerEarning,
       commissionStatus: commissionStatus ?? this.commissionStatus,

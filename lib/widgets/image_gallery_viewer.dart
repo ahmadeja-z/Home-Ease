@@ -39,7 +39,6 @@ class _GalleryBody extends StatelessWidget {
   final int initialIndex;
 
   const _GalleryBody({
-    super.key,
     required this.imageUrls,
     required this.initialIndex,
   });

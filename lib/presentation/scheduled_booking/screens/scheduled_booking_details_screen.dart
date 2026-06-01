@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:homeease/core/theme/app_theme.dart';
@@ -7,7 +9,7 @@ import 'package:homeease/presentation/customer_history/widgets/customer_completi
 import 'package:homeease/presentation/customer_history/widgets/customer_history_section_card.dart';
 import 'package:homeease/presentation/customer_history/widgets/customer_history_status_chip.dart';
 import 'package:homeease/presentation/customer_history/widgets/customer_pricing_breakdown_card.dart';
-import 'package:homeease/presentation/map_requests/widgets/request_invoice_card.dart';
+import 'package:homeease/presentation/customer_history/widgets/scheduled_request_invoice_card.dart';
 import 'package:homeease/presentation/scheduled_booking/bloc/scheduled_booking_bloc.dart';
 import 'package:homeease/presentation/scheduled_booking/bloc/scheduled_booking_event.dart';
 import 'package:homeease/presentation/scheduled_booking/bloc/scheduled_booking_state.dart';
@@ -36,10 +38,21 @@ class ScheduledBookingDetailsScreen extends StatelessWidget {
   }
 }
 
-class _ScheduledBookingDetailsView extends StatelessWidget {
+class _ScheduledBookingDetailsView extends StatefulWidget {
   final String requestId;
 
   const _ScheduledBookingDetailsView({required this.requestId});
+
+  @override
+  State<_ScheduledBookingDetailsView> createState() =>
+      _ScheduledBookingDetailsViewState();
+}
+
+class _ScheduledBookingDetailsViewState
+    extends State<_ScheduledBookingDetailsView> {
+  bool _invoiceSheetOpen = false;
+  bool _isOpeningInvoice = false;
+  DateTime? _lastAutoShownBillGeneratedAt;
 
   String _formatDateTime(DateTime? d) {
     if (d == null) return '—';
@@ -70,6 +83,15 @@ class _ScheduledBookingDetailsView extends StatelessWidget {
               backgroundColor: AppTheme.successColor,
             ),
           );
+          if (_invoiceSheetOpen && context.mounted) {
+            Navigator.of(context).maybePop();
+            _invoiceSheetOpen = false;
+          }
+        }
+
+        final booking = state.booking;
+        if (booking != null && context.mounted) {
+          _maybeAutoOpenInvoice(context, booking);
         }
       },
       builder: (context, state) {
@@ -93,7 +115,7 @@ class _ScheduledBookingDetailsView extends StatelessWidget {
                   const SizedBox(height: 12),
                   TextButton(
                     onPressed: () => context.read<ScheduledBookingBloc>().add(
-                          LoadScheduledBookingDetails(requestId),
+                          LoadScheduledBookingDetails(widget.requestId),
                         ),
                     child: const Text('Retry'),
                   ),
@@ -102,8 +124,6 @@ class _ScheduledBookingDetailsView extends StatelessWidget {
             ),
           );
         }
-
-        final isPaying = state.status == ScheduledBookingUiStatus.paying;
 
         return Scaffold(
           appBar: CustomAppBar(
@@ -138,16 +158,11 @@ class _ScheduledBookingDetailsView extends StatelessWidget {
                   ScheduledBookingTimeline(booking: booking),
                   if (booking.customerRequestImages.isNotEmpty)
                     _RequestImagesSection(booking: booking),
-                  if (booking.status == RequestStatus.billGenerated ||
-                      booking.finalAmount > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      child: RequestInvoiceCard(
-                        request: booking,
-                        isPaying: isPaying,
-                        canConfirmPayment: booking.canCustomerConfirmPayment,
-                        onConfirmPaid: () => _confirmPayment(context, booking),
-                      ),
+                  if (booking.hasPendingInvoice)
+                    ScheduledInvoiceReadyCard(
+                      request: booking,
+                      isOpening: _isOpeningInvoice,
+                      onViewInvoice: () => _openInvoiceSheet(context, booking),
                     )
                   else if (_showPricingPreview(booking))
                     CustomerPricingBreakdownCard(order: booking),
@@ -172,6 +187,115 @@ class _ScheduledBookingDetailsView extends StatelessWidget {
     return booking.status == RequestStatus.inProgress ||
         booking.status == RequestStatus.approved ||
         booking.status == RequestStatus.assigned;
+  }
+
+  void _maybeAutoOpenInvoice(
+    BuildContext context,
+    ServiceRequestModel booking,
+  ) {
+    if (!booking.hasPendingInvoice) return;
+    final billAt = booking.billGeneratedAt;
+    if (billAt == null || billAt == _lastAutoShownBillGeneratedAt) return;
+    if (_invoiceSheetOpen) return;
+
+    _lastAutoShownBillGeneratedAt = billAt;
+    logScheduledInvoiceOpened(booking);
+    unawaited(_openInvoiceSheet(context, booking, autoOpen: true));
+  }
+
+  Future<void> _openInvoiceSheet(
+    BuildContext context,
+    ServiceRequestModel booking, {
+    bool autoOpen = false,
+  }) async {
+    if (_invoiceSheetOpen) return;
+
+    if (!autoOpen) {
+      setState(() => _isOpeningInvoice = true);
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      if (!mounted) return;
+      setState(() => _isOpeningInvoice = false);
+    }
+
+    if (_invoiceSheetOpen || !mounted) return;
+
+    _invoiceSheetOpen = true;
+    logScheduledInvoiceOpened(booking);
+    final bookingBloc = context.read<ScheduledBookingBloc>();
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return BlocProvider.value(
+          value: bookingBloc,
+          child: DraggableScrollableSheet(
+            initialChildSize: 0.82,
+            minChildSize: 0.45,
+            maxChildSize: 0.95,
+            builder: (_, scrollController) {
+              return Container(
+                decoration: BoxDecoration(
+                  color: Theme.of(sheetContext).colorScheme.surface,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(24),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 10),
+                    Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[400],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    Expanded(
+                      child: BlocBuilder<ScheduledBookingBloc, ScheduledBookingState>(
+                        buildWhen: (p, c) =>
+                            p.status != c.status ||
+                            p.booking?.paymentStatus !=
+                                c.booking?.paymentStatus ||
+                            p.booking?.finalAmount != c.booking?.finalAmount,
+                        builder: (context, state) {
+                          final live = state.booking;
+                          final invoiceRequest =
+                              live != null && live.id == booking.id
+                                  ? live
+                                  : booking;
+                          final isPaying =
+                              state.status == ScheduledBookingUiStatus.paying;
+
+                          return SingleChildScrollView(
+                            controller: scrollController,
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                            child: ScheduledRequestInvoiceCard(
+                              request: invoiceRequest,
+                              isPaying: isPaying,
+                              canConfirmPayment:
+                                  invoiceRequest.canCustomerConfirmPayment,
+                              onConfirmPaid: () => _confirmPayment(
+                                context,
+                                invoiceRequest,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+
+    _invoiceSheetOpen = false;
   }
 
   void _confirmPayment(BuildContext context, ServiceRequestModel booking) {

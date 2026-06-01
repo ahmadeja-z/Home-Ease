@@ -36,6 +36,36 @@ class WorkerInstantRepository {
         });
   }
 
+  /// Realtime updates for offers waiting on the customer's decision.
+  Stream<RequestWorkerOfferModel> subscribeToPendingCustomerResponseUpdates() {
+    final workerId = currentWorkerId;
+    if (workerId == null) {
+      return Stream.error(Exception('Worker not authenticated'));
+    }
+
+    if (kDebugMode) {
+      print(
+        'WorkerInstantRepository - subscribeToPendingCustomerResponseUpdates: '
+        '$workerId',
+      );
+    }
+
+    return supabase
+        .from('request_worker_offers')
+        .stream(primaryKey: ['id'])
+        .eq('worker_id', workerId)
+        .expand((rows) {
+          return rows.map((r) => RequestWorkerOfferModel.fromJson(r));
+        })
+        .where(
+          (offer) =>
+              offer.isPendingCustomerResponse ||
+              offer.status == OfferStatus.customerCancelled ||
+              offer.status == OfferStatus.expired ||
+              offer.status == OfferStatus.customerAccepted,
+        );
+  }
+
   /// Fetch offer + joined service_requests row.
   Future<RequestWorkerOfferModel> fetchRequestByOffer(String offerId) async {
     final data = await supabase

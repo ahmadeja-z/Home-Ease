@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:homeease/core/assets/app_images.dart';
+import 'package:homeease/presentation/customer_drawer/bloc/customer_drawer_bloc.dart';
+import 'package:homeease/presentation/customer_drawer/bloc/customer_drawer_event.dart';
+import 'package:homeease/presentation/customer_drawer/customer_app_drawer.dart';
+import 'package:homeease/presentation/customer_history/repository/customer_history_repository.dart';
 import 'package:homeease/presentation/customer_history/screens/customer_history_screen.dart';
-import 'package:homeease/presentation/drawer/drawer.dart';
 import 'package:homeease/presentation/home/home_screen.dart';
 import 'package:homeease/presentation/profile/profile_screen.dart';
+import 'package:homeease/repositories/user_repository.dart';
 import '../map_requests/map_requests_screen.dart';
 import 'bloc/navbar_bloc.dart';
 import 'bloc/navbar_event.dart';
@@ -23,8 +27,16 @@ class NavbarScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider(
-      create: (context) => NavbarBloc(),
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider(create: (_) => NavbarBloc()),
+        BlocProvider(
+          create: (context) => CustomerDrawerBloc(
+            historyRepository: CustomerHistoryRepository(),
+            userRepository: context.read<UserRepository>(),
+          )..add(const LoadCustomerDrawerData()),
+        ),
+      ],
       child: NavbarView(screens: _screens),
     );
   }
@@ -78,7 +90,7 @@ class NavbarView extends StatelessWidget {
           ),
         ),
       ),
-      drawer: const AppDrawer(),
+      drawer: const CustomerAppDrawer(),
 
       extendBody:
           true, // allows body to go behind the nav bar for glassmorphism

@@ -9,6 +9,10 @@ import 'package:homeease/presentation/customer_history/widgets/customer_history_
 import 'package:homeease/presentation/customer_history/widgets/customer_history_summary_cards.dart';
 import 'package:homeease/presentation/customer_history/widgets/instant_orders_history_tab.dart';
 import 'package:homeease/presentation/customer_history/widgets/scheduled_requests_history_tab.dart';
+import 'package:homeease/presentation/customer_drawer/models/customer_history_drawer_intent.dart';
+import 'package:homeease/presentation/navbar/bloc/navbar_bloc.dart';
+import 'package:homeease/presentation/navbar/bloc/navbar_event.dart';
+import 'package:homeease/presentation/navbar/bloc/navbar_state.dart';
 
 class CustomerHistoryScreen extends StatelessWidget {
   const CustomerHistoryScreen({super.key});
@@ -36,12 +40,43 @@ class _CustomerHistoryView extends StatefulWidget {
 class _CustomerHistoryViewState extends State<_CustomerHistoryView>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  Object? _lastAppliedDrawerToken;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(_onTabChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final nav = context.read<NavbarBloc>().state;
+      _applyDrawerIntentIfNeeded(
+        nav.pendingHistoryIntent,
+        nav.drawerNavigationToken,
+      );
+    });
+  }
+
+  void _applyDrawerIntentIfNeeded(
+    CustomerHistoryDrawerIntent? intent,
+    int token,
+  ) {
+    if (intent == null || !mounted) return;
+    if (_lastAppliedDrawerToken == token) return;
+
+    _lastAppliedDrawerToken = token;
+    context.read<NavbarBloc>().add(const ClearDrawerHistoryIntent());
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final bloc = context.read<CustomerHistoryBloc>();
+      bloc.add(CustomerHistoryTabChanged(intent.tab));
+      if (intent.scheduledFilters != null) {
+        bloc.add(ApplyScheduledHistoryFilters(intent.scheduledFilters!));
+      }
+      if (intent.instantFilters != null) {
+        bloc.add(ApplyInstantHistoryFilters(intent.instantFilters!));
+      }
+    });
   }
 
   void _onTabChanged() {
@@ -65,7 +100,17 @@ class _CustomerHistoryViewState extends State<_CustomerHistoryView>
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return BlocConsumer<CustomerHistoryBloc, CustomerHistoryState>(
+    return BlocListener<NavbarBloc, NavbarState>(
+      listenWhen: (p, c) =>
+          p.pendingHistoryIntent != c.pendingHistoryIntent &&
+          c.pendingHistoryIntent != null,
+      listener: (context, state) {
+        _applyDrawerIntentIfNeeded(
+          state.pendingHistoryIntent,
+          state.drawerNavigationToken,
+        );
+      },
+      child: BlocConsumer<CustomerHistoryBloc, CustomerHistoryState>(
       listenWhen: (p, c) =>
           c.errorMessage != null && p.errorMessage != c.errorMessage,
       listener: (context, state) {
@@ -129,6 +174,7 @@ class _CustomerHistoryViewState extends State<_CustomerHistoryView>
           ],
         );
       },
+      ),
     );
   }
 

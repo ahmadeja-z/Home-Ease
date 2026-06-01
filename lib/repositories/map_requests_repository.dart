@@ -10,6 +10,26 @@ import 'package:homeease/models/worker_profile_model.dart';
 import 'package:homeease/core/services/permission_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+class CancelInstantRequestResult {
+  final bool success;
+  final String requestId;
+  final int offersCancelledCount;
+
+  const CancelInstantRequestResult({
+    required this.success,
+    required this.requestId,
+    required this.offersCancelledCount,
+  });
+
+  factory CancelInstantRequestResult.fromJson(Map<String, dynamic> json) {
+    return CancelInstantRequestResult(
+      success: json['success'] as bool? ?? false,
+      requestId: json['request_id'] as String,
+      offersCancelledCount: (json['offers_cancelled_count'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 class MapRequestsRepository {
   final supabase = Supabase.instance.client;
   StreamSubscription<List<Map<String, dynamic>>>? _workersSubscription;
@@ -469,6 +489,64 @@ class MapRequestsRepository {
     );
   }
 
+  static const List<String> activeInstantStatuses = [
+    'pending',
+    'accepted',
+    'worker_on_the_way',
+    'arrived',
+    'in_progress',
+    'bill_generated',
+  ];
+
+  /// Latest in-progress instant request for the customer (REST fetch).
+  Future<ServiceRequestModel?> fetchActiveInstantRequest(String customerId) async {
+    try {
+      final row = await supabase
+          .from('service_requests')
+          .select('*')
+          .eq('customer_id', customerId)
+          .eq('booking_type', 'instant')
+          .eq('request_flow', 'direct_worker')
+          .inFilter('status', activeInstantStatuses)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (row == null) return null;
+
+      final models = await _mapRowsWithWorkers([row]);
+      return models.first;
+    } on PostgrestException catch (e) {
+      if (kDebugMode) {
+        print('MapRequestsRepository - fetchActiveInstantRequest: ${e.message}');
+      }
+      rethrow;
+    }
+  }
+
+  /// Fetch a single service request with worker profile enrichment.
+  Future<ServiceRequestModel> fetchRequestById(String requestId) async {
+    try {
+      final row = await supabase
+          .from('service_requests')
+          .select('*')
+          .eq('id', requestId)
+          .maybeSingle();
+
+      if (row == null) {
+        throw Exception('Request not found');
+      }
+
+      final models = await _mapRowsWithWorkers([row]);
+      return models.first;
+    } on PostgrestException catch (e) {
+      if (kDebugMode) {
+        print('MapRequestsRepository - fetchRequestById: ${e.message}');
+      }
+      rethrow;
+    }
+  }
+
   /// Realtime updates for the current customer's active requests.
   Stream<ServiceRequestModel?> subscribeToCustomerRequestUpdates(
     String customerId,
@@ -504,18 +582,8 @@ class MapRequestsRepository {
           }
         })
         .map((event) {
-          // Exclude completed — shown only in-session after customer confirms payment.
-          const activeStatuses = [
-            'pending',
-            'accepted',
-            'worker_on_the_way',
-            'arrived',
-            'in_progress',
-            'bill_generated',
-          ];
-
           final activeRequests = event.where(
-            (req) => activeStatuses.contains(req['status']),
+            (req) => activeInstantStatuses.contains(req['status']),
           );
 
           if (activeRequests.isEmpty) {
@@ -550,6 +618,44 @@ class MapRequestsRepository {
 
           return request;
         });
+  }
+
+  Future<List<ServiceRequestModel>> _mapRowsWithWorkers(
+    List<Map<String, dynamic>> rows,
+  ) async {
+    if (rows.isEmpty) return [];
+
+    final workerIds = rows
+        .map((r) => r['worker_id'] as String?)
+        .whereType<String>()
+        .toSet()
+        .toList();
+
+    final profilesById = <String, Map<String, dynamic>>{};
+    if (workerIds.isNotEmpty) {
+      final profiles = await supabase
+          .from('profiles')
+          .select('id, name, profile_picture, phone_number, rating')
+          .inFilter('id', workerIds);
+
+      for (final p in profiles) {
+        final map = Map<String, dynamic>.from(p as Map);
+        profilesById[map['id'] as String] = map;
+      }
+    }
+
+    return rows.map((row) {
+      final copy = Map<String, dynamic>.from(row);
+      final workerId = copy['worker_id'] as String?;
+      if (workerId != null && profilesById.containsKey(workerId)) {
+        final profile = profilesById[workerId]!;
+        copy['worker_name'] = profile['name'];
+        copy['worker_profile_picture'] = profile['profile_picture'];
+        copy['worker_phone'] = profile['phone_number'];
+        copy['worker_rating'] = profile['rating'];
+      }
+      return _mapRequestRow(copy);
+    }).toList();
   }
 
   ServiceRequestModel _mapRequestRow(Map<String, dynamic> requestData) {
@@ -655,24 +761,64 @@ class MapRequestsRepository {
     }).eq('id', requestId);
   }
 
+  /// Customer cancels a pending instant request and closes all open worker offers.
+  Future<CancelInstantRequestResult> customerCancelInstantRequest({
+    required String requestId,
+    required String customerId,
+    String? reason,
+  }) async {
+    if (kDebugMode) {
+      print('MapRequestsRepository - cancel RPC params:');
+      print('  requestId: $requestId');
+      print('  customerId: $customerId');
+      print('  reason: ${reason ?? "(none)"}');
+    }
+
+    try {
+      final data = await supabase.rpc(
+        'customer_cancel_instant_request',
+        params: {
+          'p_request_id': requestId,
+          'p_customer_id': customerId,
+          'p_reason': reason,
+        },
+      );
+
+      final result = CancelInstantRequestResult.fromJson(
+        Map<String, dynamic>.from(data as Map),
+      );
+
+      if (kDebugMode) {
+        print('MapRequestsRepository - cancel RPC success: ${result.requestId}');
+        print(
+          'MapRequestsRepository - offers customer_cancelled count: '
+          '${result.offersCancelledCount}',
+        );
+      }
+
+      return result;
+    } on PostgrestException catch (e) {
+      if (kDebugMode) {
+        print('PostgrestException customerCancelInstantRequest: ${e.message}');
+      }
+      rethrow;
+    }
+  }
+
+  /// @deprecated Use [customerCancelInstantRequest] for pending instant requests.
   Future<void> cancelJob({
     required String requestId,
     String? reason,
   }) async {
-    await supabase.from('service_requests').update({
-      'status': 'cancelled',
-      'cancellation_reason': reason,
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', requestId);
-
-    await supabase
-        .from('request_worker_offers')
-        .update({
-          'status': 'expired',
-          'responded_at': DateTime.now().toUtc().toIso8601String(),
-        })
-        .eq('request_id', requestId)
-        .eq('status', 'sent');
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) {
+      throw Exception('User not authenticated');
+    }
+    await customerCancelInstantRequest(
+      requestId: requestId,
+      customerId: userId,
+      reason: reason,
+    );
   }
 
   void dispose() {

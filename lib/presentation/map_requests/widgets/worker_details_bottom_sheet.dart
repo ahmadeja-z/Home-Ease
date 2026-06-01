@@ -7,13 +7,11 @@ import 'package:homeease/widgets/app_cache_image.dart';
 class WorkerDetailsBottomSheet extends StatefulWidget {
   final NearbyWorkerModel worker;
   final Future<WorkerProfileModel?> Function() fetchProfile;
-  final VoidCallback? onRequestService;
 
   const WorkerDetailsBottomSheet({
     super.key,
     required this.worker,
     required this.fetchProfile,
-    this.onRequestService,
   });
 
   @override
@@ -197,27 +195,6 @@ class _WorkerDetailsBottomSheetState extends State<WorkerDetailsBottomSheet> {
               Text(
                 'Worker ID: ${worker.id}',
                 style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-              ),
-            ],
-            if (widget.onRequestService != null) ...[
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: widget.onRequestService,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.colorScheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                  child: const Text(
-                    'Request Service',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                ),
               ),
             ],
           ],

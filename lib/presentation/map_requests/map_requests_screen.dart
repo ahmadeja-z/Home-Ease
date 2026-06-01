@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -9,7 +11,7 @@ import 'package:homeease/models/services_category_model.dart';
 import 'package:homeease/presentation/map_requests/bloc/map_requests_bloc.dart';
 import 'package:homeease/presentation/map_requests/bloc/map_requests_event.dart';
 import 'package:homeease/presentation/map_requests/bloc/map_requests_state.dart';
-import 'package:homeease/presentation/map_requests/widgets/request_invoice_card.dart';
+import 'package:homeease/presentation/map_requests/widgets/instant_request_invoice_card.dart';
 import 'package:homeease/presentation/map_requests/widgets/worker_details_bottom_sheet.dart';
 import 'package:homeease/presentation/map_requests/widgets/worker_offer_card.dart';
 import 'package:homeease/core/services/geocoding_service.dart';
@@ -53,6 +55,7 @@ class _MapRequestsViewState extends State<MapRequestsView>
   double _oldHeading = 0.0;
   double _currentHeading = 0.0;
   bool _markerIconsReady = false;
+  bool _invoiceSheetOpen = false;
 
   @override
   void initState() {
@@ -83,7 +86,9 @@ class _MapRequestsViewState extends State<MapRequestsView>
   }
 
   Future<void> _checkForActiveRequest() async {
-    context.read<MapRequestsBloc>().add(ListenActiveRequestEvent());
+    final bloc = context.read<MapRequestsBloc>();
+    bloc.add(const LoadActiveRequestById());
+    bloc.add(ListenActiveRequestEvent());
   }
 
   Future<void> _loadMarkerIcons() async {
@@ -95,7 +100,6 @@ class _MapRequestsViewState extends State<MapRequestsView>
 
   void _showWorkerDetailsBottomSheet(NearbyWorkerModel worker) {
     final bloc = context.read<MapRequestsBloc>();
-    final state = bloc.state;
 
     showModalBottomSheet<void>(
       context: context,
@@ -104,12 +108,6 @@ class _MapRequestsViewState extends State<MapRequestsView>
       builder: (sheetContext) => WorkerDetailsBottomSheet(
         worker: worker,
         fetchProfile: () => bloc.repository.getWorkerProfileById(worker.id),
-        onRequestService: state.hasActiveRequest
-            ? null
-            : () {
-                Navigator.pop(sheetContext);
-                _showRequestBottomSheet(context);
-              },
       ),
     );
   }
@@ -306,11 +304,24 @@ class _MapRequestsViewState extends State<MapRequestsView>
           ),
           BlocListener<MapRequestsBloc, MapRequestsState>(
             listenWhen: (previous, current) =>
-                !previous.showInvoice && current.showInvoice,
+                previous.invoicePresentationToken !=
+                current.invoicePresentationToken,
             listener: (context, state) {
-              final id = state.activeRequest?.id;
-              if (id != null) {
-                logInvoiceOpened(id);
+              final request = state.activeRequest;
+              if (request != null) {
+                logInstantInvoiceOpened(request);
+              }
+              unawaited(_presentInvoiceSheet(context));
+            },
+          ),
+          BlocListener<MapRequestsBloc, MapRequestsState>(
+            listenWhen: (previous, current) =>
+                previous.isPayingInvoice &&
+                !current.isPayingInvoice &&
+                current.showCompleted,
+            listener: (context, state) {
+              if (_invoiceSheetOpen && Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
               }
             },
           ),
@@ -581,7 +592,9 @@ class _MapRequestsViewState extends State<MapRequestsView>
     return BlocBuilder<MapRequestsBloc, MapRequestsState>(
       buildWhen: (p, c) => p.isLoading != c.isLoading || p.status != c.status,
       builder: (context, state) {
-        if (!state.isLoading && state.status != MapRequestStatus.loadingNearby) {
+        if (!state.isLoading &&
+            state.status != MapRequestStatus.loadingNearby &&
+            state.status != MapRequestStatus.cancellingRequest) {
           return const SizedBox.shrink();
         }
         return Container(
@@ -618,55 +631,25 @@ class _MapRequestsViewState extends State<MapRequestsView>
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 10,
-                  ),
-                ],
-              ),
-              child: IconButton(
-                icon: const Icon(Icons.my_location),
-                tooltip: 'Go to my location',
-                onPressed: _onLocatePressed,
-              ),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.1),
+                  blurRadius: 10,
+                ),
+              ],
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
-                      blurRadius: 10,
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.search, color: Colors.grey),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Search services...',
-                      style: TextStyle(color: Colors.grey[600], fontSize: 16),
-                    ),
-                  ],
-                ),
-              ),
+            child: IconButton(
+              icon: const Icon(Icons.my_location),
+              tooltip: 'Go to my location',
+              onPressed: _onLocatePressed,
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -676,9 +659,12 @@ class _MapRequestsViewState extends State<MapRequestsView>
     return BlocBuilder<MapRequestsBloc, MapRequestsState>(
       buildWhen: (previous, current) =>
           previous.hasActiveRequest != current.hasActiveRequest ||
-          previous.showCompleted != current.showCompleted,
+          previous.showCompleted != current.showCompleted ||
+          previous.showCancelled != current.showCancelled,
       builder: (context, state) {
-        if (state.hasActiveRequest || state.showCompleted) {
+        if (state.hasActiveRequest ||
+            state.showCompleted ||
+            state.showCancelled) {
           return const SizedBox.shrink();
         }
 
@@ -725,6 +711,8 @@ class _MapRequestsViewState extends State<MapRequestsView>
     switch (status) {
       case MapRequestStatus.requestSending:
         return 'Sending request…';
+      case MapRequestStatus.cancellingRequest:
+        return 'Cancelling request…';
       case MapRequestStatus.acceptingOffer:
         return 'Accepting offer…';
       case MapRequestStatus.paymentProcessing:
@@ -743,27 +731,32 @@ class _MapRequestsViewState extends State<MapRequestsView>
       buildWhen: (previous, current) =>
           previous.activeRequest != current.activeRequest ||
           previous.status != current.status ||
-          previous.workerOffers != current.workerOffers,
+          previous.workerOffers != current.workerOffers ||
+          previous.showCancelled != current.showCancelled ||
+          previous.hasPendingInvoice != current.hasPendingInvoice ||
+          previous.isInvoiceOpening != current.isInvoiceOpening ||
+          previous.isPayingInvoice != current.isPayingInvoice ||
+          previous.showCompleted != current.showCompleted,
       builder: (context, state) {
+        if (state.showCancelled && state.activeRequest != null) {
+          return Positioned(
+            bottom: _bottomOverlayInset(context),
+            left: 16,
+            right: 16,
+            child: _CancelledRequestCard(
+              request: state.activeRequest!,
+              onDismiss: () {
+                context.read<MapRequestsBloc>().add(ClearActiveRequestEvent());
+              },
+            ),
+          );
+        }
+
         if (state.activeRequest == null) {
           return const SizedBox.shrink();
         }
 
         final request = state.activeRequest!;
-
-        if (state.showInvoice) {
-          return Positioned(
-            bottom: _bottomOverlayInset(context),
-            left: 16,
-            right: 16,
-            child: RequestInvoiceCard(
-              request: request,
-              isPaying: state.status == MapRequestStatus.paymentProcessing,
-              canConfirmPayment: state.canSubmitPayment,
-              onConfirmPaid: () => _showConfirmPaymentDialog(context, request),
-            ),
-          );
-        }
 
         if (state.showCompleted) {
           return Positioned(
@@ -801,6 +794,16 @@ class _MapRequestsViewState extends State<MapRequestsView>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (state.hasPendingInvoice)
+                    InvoiceReadyCard(
+                      request: request,
+                      isOpening: state.isInvoiceOpening,
+                      onViewInvoice: () {
+                        context.read<MapRequestsBloc>().add(
+                              OpenInvoiceRequested(requestId: request.id),
+                            );
+                      },
+                    ),
                   if (state.hasWorkerOffers)
                     ...state.workerOffers.map(
                       (display) => WorkerOfferCard(
@@ -821,8 +824,14 @@ class _MapRequestsViewState extends State<MapRequestsView>
                     request: request,
                     status: state.status,
                     waitingForOffers: state.isWaitingForOffers,
+                    hasWorkerOffers: state.hasWorkerOffers,
+                    canCancel: state.canCancelInstantRequest,
+                    isCancelling:
+                        state.status == MapRequestStatus.cancellingRequest,
                     onCancel: () =>
                         _showCancelDialog(context, request.id),
+                    onCancelNotAllowed: () =>
+                        _showCancelNotAllowedMessage(context),
                   ),
                 ],
               ),
@@ -870,6 +879,82 @@ class _MapRequestsViewState extends State<MapRequestsView>
     );
   }
 
+  Future<void> _presentInvoiceSheet(BuildContext context) async {
+    if (_invoiceSheetOpen || !context.mounted) return;
+    _invoiceSheetOpen = true;
+
+    final bloc = context.read<MapRequestsBloc>();
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      isDismissible: true,
+      builder: (sheetContext) {
+        return BlocProvider.value(
+          value: bloc,
+          child: BlocBuilder<MapRequestsBloc, MapRequestsState>(
+            buildWhen: (previous, current) =>
+                previous.activeRequest != current.activeRequest ||
+                previous.isPayingInvoice != current.isPayingInvoice ||
+                previous.canSubmitPayment != current.canSubmitPayment,
+            builder: (context, state) {
+              final request = state.activeRequest;
+              if (request == null) {
+                return const SizedBox.shrink();
+              }
+
+              return DraggableScrollableSheet(
+                initialChildSize: 0.82,
+                minChildSize: 0.45,
+                maxChildSize: 0.95,
+                builder: (_, scrollController) {
+                  return Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(24),
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 10),
+                        Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Colors.grey[400],
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            controller: scrollController,
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                            child: InstantRequestInvoiceCard(
+                              request: request,
+                              isPaying: state.isPayingInvoice,
+                              canConfirmPayment: state.canSubmitPayment,
+                              onConfirmPaid: () =>
+                                  _showConfirmPaymentDialog(context, request),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        );
+      },
+    );
+
+    _invoiceSheetOpen = false;
+    bloc.add(const CloseInvoiceDialog());
+  }
+
   void _showConfirmPaymentDialog(
     BuildContext context,
     ServiceRequestModel request,
@@ -893,7 +978,7 @@ class _MapRequestsViewState extends State<MapRequestsView>
           TextButton(
             onPressed: () {
               Navigator.pop(dialogContext);
-              bloc.add(PayInvoiceEvent(request.id));
+              bloc.add(PayInvoiceRequested(request.id));
             },
             child: const Text('Confirm'),
           ),
@@ -902,35 +987,157 @@ class _MapRequestsViewState extends State<MapRequestsView>
     );
   }
 
+  void _showCancelNotAllowedMessage(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Worker already assigned. Please cancel from active request flow.',
+        ),
+      ),
+    );
+  }
+
   void _showCancelDialog(BuildContext context, String requestId) {
     final bloc = context.read<MapRequestsBloc>();
+
     showDialog<void>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Cancel Request'),
-        content: const Text('Are you sure you want to cancel this request?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('No'),
+      barrierDismissible: false,
+      builder: (dialogContext) => _CancelInstantRequestDialog(
+        onConfirm: (reason) {
+          if (kDebugMode) {
+            print('MapRequestsScreen - cancel request clicked: $requestId');
+          }
+          bloc.add(
+            CancelJobEvent(
+              requestId: requestId,
+              reason: reason,
+            ),
+          );
+          Navigator.pop(dialogContext);
+        },
+      ),
+    );
+  }
+
+}
+
+class _CancelInstantRequestDialog extends StatefulWidget {
+  final void Function(String? reason) onConfirm;
+
+  const _CancelInstantRequestDialog({required this.onConfirm});
+
+  @override
+  State<_CancelInstantRequestDialog> createState() =>
+      _CancelInstantRequestDialogState();
+}
+
+class _CancelInstantRequestDialogState
+    extends State<_CancelInstantRequestDialog> {
+  final _reasonController = TextEditingController();
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Cancel request?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Cancel this request? All worker offers will be closed.',
           ),
-          TextButton(
-            onPressed: () {
-              bloc.add(
-                CancelJobEvent(
-                  requestId: requestId,
-                  reason: 'Customer cancelled',
-                ),
-              );
-              Navigator.pop(dialogContext);
-            },
-            child: const Text('Yes', style: TextStyle(color: Colors.red)),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _reasonController,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: 'Reason (optional)',
+              hintText: 'Why are you cancelling?',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Keep request'),
+        ),
+        TextButton(
+          onPressed: () {
+            final reason = _reasonController.text.trim();
+            widget.onConfirm(reason.isEmpty ? null : reason);
+          },
+          child: const Text(
+            'Cancel request',
+            style: TextStyle(color: Colors.red),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CancelledRequestCard extends StatelessWidget {
+  final ServiceRequestModel request;
+  final VoidCallback onDismiss;
+
+  const _CancelledRequestCard({
+    required this.request,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 20,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Icon(Icons.cancel_outlined, color: Colors.red, size: 48),
+          const SizedBox(height: 12),
+          const Text(
+            'Request cancelled',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            request.cancellationReason?.isNotEmpty == true
+                ? request.cancellationReason!
+                : 'Your instant request was cancelled. All worker offers are closed.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey[600]),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: onDismiss,
+            child: const Text('Back to map'),
           ),
         ],
       ),
     );
   }
-
 }
 
 class _CompletedRequestCard extends StatefulWidget {
@@ -1103,13 +1310,21 @@ class _RequestTrackingCard extends StatelessWidget {
   final ServiceRequestModel request;
   final MapRequestStatus status;
   final bool waitingForOffers;
+  final bool hasWorkerOffers;
+  final bool canCancel;
+  final bool isCancelling;
   final VoidCallback onCancel;
+  final VoidCallback onCancelNotAllowed;
 
   const _RequestTrackingCard({
     required this.request,
     required this.status,
     required this.waitingForOffers,
+    required this.hasWorkerOffers,
+    required this.canCancel,
+    required this.isCancelling,
     required this.onCancel,
+    required this.onCancelNotAllowed,
   });
 
   @override
@@ -1229,26 +1444,43 @@ class _RequestTrackingCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 12),
-          Row(
-            children: [
-              if (request.status == RequestStatus.pending ||
-                  request.status == RequestStatus.accepted)
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: onCancel,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.red,
-                      side: const BorderSide(color: Colors.red),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+          if (canCancel || request.status == RequestStatus.accepted)
+            Row(
+              children: [
+                if (canCancel)
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: isCancelling ? null : onCancel,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        hasWorkerOffers ? 'Close request' : 'Cancel request',
                       ),
                     ),
-                    child: const Text('Cancel'),
+                  )
+                else if (request.status == RequestStatus.accepted)
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: onCancelNotAllowed,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Cancel'),
+                    ),
                   ),
-                ),
-            ],
-          ),
+              ],
+            ),
         ],
       ),
     );

@@ -8,6 +8,7 @@ enum OfferStatus {
   customerAccepted,
   rejected,
   expired,
+  customerCancelled,
 }
 
 enum OfferType {
@@ -69,10 +70,15 @@ class RequestWorkerOfferModel {
       status == OfferStatus.acceptedByWorker ||
       status == OfferStatus.counterOffer;
 
+  bool get isPendingCustomerResponse =>
+      status == OfferStatus.acceptedByWorker ||
+      status == OfferStatus.counterOffer;
+
   bool get isTerminal =>
       status == OfferStatus.rejected ||
       status == OfferStatus.expired ||
-      status == OfferStatus.customerAccepted;
+      status == OfferStatus.customerAccepted ||
+      status == OfferStatus.customerCancelled;
 
   static OfferType _parseOfferType(String? value) {
     switch (value) {
@@ -99,6 +105,8 @@ class RequestWorkerOfferModel {
         return OfferStatus.rejected;
       case 'expired':
         return OfferStatus.expired;
+      case 'customer_cancelled':
+        return OfferStatus.customerCancelled;
       case 'sent':
       default:
         return OfferStatus.sent;
@@ -119,6 +127,8 @@ class RequestWorkerOfferModel {
         return 'rejected';
       case OfferStatus.expired:
         return 'expired';
+      case OfferStatus.customerCancelled:
+        return 'customer_cancelled';
       case OfferStatus.sent:
         return 'sent';
     }

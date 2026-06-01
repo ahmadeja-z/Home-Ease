@@ -22,6 +22,8 @@ enum MapRequestStatus {
   paymentError,
   completed,
   jobCompleted,
+  requestCancelled,
+  cancellingRequest,
   error,
 }
 
@@ -42,6 +44,12 @@ class MapRequestsState extends Equatable {
   final LatLng? activeWorkerLocation;
   final double activeWorkerHeading;
   final int recenterMapToken;
+  final bool invoiceDialogShown;
+  final bool isInvoiceOpening;
+  final bool isPayingInvoice;
+  final bool showInvoiceDialog;
+  final DateTime? lastAutoShownBillGeneratedAt;
+  final int invoicePresentationToken;
 
   const MapRequestsState({
     this.status = MapRequestStatus.initial,
@@ -60,6 +68,12 @@ class MapRequestsState extends Equatable {
     this.activeWorkerLocation,
     this.activeWorkerHeading = 0.0,
     this.recenterMapToken = 0,
+    this.invoiceDialogShown = false,
+    this.isInvoiceOpening = false,
+    this.isPayingInvoice = false,
+    this.showInvoiceDialog = false,
+    this.lastAutoShownBillGeneratedAt,
+    this.invoicePresentationToken = 0,
   });
 
   MapRequestsState copyWith({
@@ -79,9 +93,17 @@ class MapRequestsState extends Equatable {
     LatLng? activeWorkerLocation,
     double? activeWorkerHeading,
     int? recenterMapToken,
+    bool? invoiceDialogShown,
+    bool? isInvoiceOpening,
+    bool? isPayingInvoice,
+    bool? showInvoiceDialog,
+    DateTime? lastAutoShownBillGeneratedAt,
+    int? invoicePresentationToken,
     bool clearSelectedWorker = false,
     bool clearActiveRequest = false,
     bool clearWorkerOffers = false,
+    bool clearShowInvoiceDialog = false,
+    bool clearLastAutoShownBillGeneratedAt = false,
   }) {
     return MapRequestsState(
       status: status ?? this.status,
@@ -105,6 +127,17 @@ class MapRequestsState extends Equatable {
           activeWorkerLocation ?? this.activeWorkerLocation,
       activeWorkerHeading: activeWorkerHeading ?? this.activeWorkerHeading,
       recenterMapToken: recenterMapToken ?? this.recenterMapToken,
+      invoiceDialogShown: invoiceDialogShown ?? this.invoiceDialogShown,
+      isInvoiceOpening: isInvoiceOpening ?? this.isInvoiceOpening,
+      isPayingInvoice: isPayingInvoice ?? this.isPayingInvoice,
+      showInvoiceDialog: clearShowInvoiceDialog
+          ? false
+          : (showInvoiceDialog ?? this.showInvoiceDialog),
+      lastAutoShownBillGeneratedAt: clearLastAutoShownBillGeneratedAt
+          ? null
+          : (lastAutoShownBillGeneratedAt ?? this.lastAutoShownBillGeneratedAt),
+      invoicePresentationToken:
+          invoicePresentationToken ?? this.invoicePresentationToken,
     );
   }
 
@@ -113,7 +146,7 @@ class MapRequestsState extends Equatable {
       status == MapRequestStatus.loadingNearby ||
       status == MapRequestStatus.requestSending ||
       status == MapRequestStatus.acceptingOffer ||
-      status == MapRequestStatus.paymentProcessing;
+      status == MapRequestStatus.cancellingRequest;
 
   bool get isCompletedPaid =>
       activeRequest != null &&
@@ -137,11 +170,7 @@ class MapRequestsState extends Equatable {
       status == MapRequestStatus.trackingWorker ||
       status == MapRequestStatus.jobStarted;
 
-  bool get showInvoice =>
-      activeRequest != null &&
-      activeRequest!.canCustomerConfirmPayment &&
-      (status == MapRequestStatus.billGenerated ||
-          status == MapRequestStatus.paymentError);
+  bool get hasPendingInvoice => activeRequest?.canCustomerConfirmPayment ?? false;
 
   bool get showCompleted =>
       activeRequest != null &&
@@ -150,8 +179,13 @@ class MapRequestsState extends Equatable {
       (status == MapRequestStatus.completed ||
           status == MapRequestStatus.paymentSuccess);
 
-  bool get canSubmitPayment =>
-      activeRequest?.canCustomerConfirmPayment ?? false;
+  bool get showCancelled =>
+      status == MapRequestStatus.requestCancelled;
+
+  bool get canCancelInstantRequest =>
+      activeRequest?.status == RequestStatus.pending;
+
+  bool get canSubmitPayment => hasPendingInvoice;
 
   @override
   List<Object?> get props => [
@@ -171,5 +205,11 @@ class MapRequestsState extends Equatable {
         activeWorkerLocation,
         activeWorkerHeading,
         recenterMapToken,
+        invoiceDialogShown,
+        isInvoiceOpening,
+        isPayingInvoice,
+        showInvoiceDialog,
+        lastAutoShownBillGeneratedAt,
+        invoicePresentationToken,
       ];
 }

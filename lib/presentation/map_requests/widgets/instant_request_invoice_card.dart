@@ -5,15 +5,15 @@ import 'package:homeease/models/service_request_model.dart';
 import 'package:homeease/widgets/app_cache_image.dart';
 import 'package:homeease/widgets/image_gallery_viewer.dart';
 
-/// Invoice + “I Paid the Worker” for scheduled requests.
+/// Invoice shown on the map when an instant request reaches `bill_generated`.
 /// All amounts are read from [ServiceRequestModel] — never recalculated here.
-class ScheduledRequestInvoiceCard extends StatelessWidget {
+class InstantRequestInvoiceCard extends StatelessWidget {
   final ServiceRequestModel request;
   final bool isPaying;
   final bool canConfirmPayment;
   final VoidCallback onConfirmPaid;
 
-  const ScheduledRequestInvoiceCard({
+  const InstantRequestInvoiceCard({
     super.key,
     required this.request,
     required this.isPaying,
@@ -23,19 +23,9 @@ class ScheduledRequestInvoiceCard extends StatelessWidget {
 
   bool get _hasSystemBreakdown =>
       request.commissionPercentage != null ||
+      request.commissionBaseAmount != null ||
       request.platformCommission != null ||
       request.workerEarning != null;
-
-  String get _pricingTypeLabel {
-    switch (request.pricingType) {
-      case PricingType.fixed:
-        return 'Fixed price';
-      case PricingType.hourly:
-        return 'Hourly';
-      case PricingType.unknown:
-        return '—';
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -70,19 +60,23 @@ class ScheduledRequestInvoiceCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          _line('Pricing type', _pricingTypeLabel),
-          ..._workChargeLines(),
+          _line('Accepted price (per hour)', _money(request.acceptedPrice)),
+          _line(
+            'Total hours',
+            request.totalHours?.toStringAsFixed(1) ?? '—',
+          ),
+          _line('Labor charges', _money(request.laborCharges)),
           _line('Material charges', _money(request.materialCharges)),
           const Divider(height: 24),
           _line(
-            'Total payable',
+            'Amount to pay',
             _money(request.finalAmount),
             bold: true,
           ),
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
-              'Work charges + material charges',
+              'Labor charges + material charges',
               style: TextStyle(fontSize: 11, color: Colors.grey[600]),
             ),
           ),
@@ -99,8 +93,13 @@ class ScheduledRequestInvoiceCard extends StatelessWidget {
             const SizedBox(height: 8),
             if (request.commissionPercentage != null)
               _systemLine(
-                'Commission percentage',
+                'Platform commission percentage',
                 '${request.commissionPercentage!.toStringAsFixed(1)}%',
+              ),
+            if (request.commissionBaseAmount != null)
+              _systemLine(
+                'Commission base amount',
+                _money(request.commissionBaseAmount),
               ),
             if (request.platformCommission != null)
               _systemLine(
@@ -109,11 +108,6 @@ class ScheduledRequestInvoiceCard extends StatelessWidget {
               ),
             if (request.workerEarning != null)
               _systemLine('Worker earning', _money(request.workerEarning)),
-            if (request.materialCharges > 0)
-              _systemLine(
-                'Material reimbursement',
-                _money(request.materialCharges),
-              ),
             const SizedBox(height: 4),
           ],
           _line(
@@ -232,70 +226,17 @@ class ScheduledRequestInvoiceCard extends StatelessWidget {
     );
   }
 
-  List<Widget> _workChargeLines() {
-    if (request.pricingType == PricingType.fixed) {
-      return [
-        _line('Fixed service charge', _money(request.laborCharges)),
-      ];
-    }
-
-    if (request.pricingType == PricingType.hourly) {
-      final rate = request.acceptedPrice;
-      final hours = request.totalHours;
-      final labor = request.laborCharges;
-
-      return [
-        if (rate != null)
-          _line('Accepted price (per hour)', _money(rate)),
-        if (hours != null)
-          _line('Total hours', hours.toStringAsFixed(1)),
-        _line(
-          'Work charges',
-          _money(labor),
-          subtitle: rate != null && hours != null
-              ? '${_money(rate)}/hr × ${hours.toStringAsFixed(1)} hr = ${_money(labor)}'
-              : null,
-        ),
-      ];
-    }
-
-    return [
-      _line('Work charges', _money(request.laborCharges)),
-    ];
-  }
-
-  Widget _line(
-    String label,
-    String value, {
-    String? subtitle,
-    bool bold = false,
-  }) {
+  Widget _line(String label, String value, {bool bold = false}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: Colors.grey[700],
-                    fontWeight: bold ? FontWeight.w600 : FontWeight.normal,
-                  ),
-                ),
-                if (subtitle != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      subtitle,
-                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                    ),
-                  ),
-              ],
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.grey[700],
+              fontWeight: bold ? FontWeight.w600 : FontWeight.normal,
             ),
           ),
           Text(
@@ -338,13 +279,27 @@ class ScheduledRequestInvoiceCard extends StatelessWidget {
   }
 }
 
-/// Persistent prompt when a scheduled bill is ready — survives sheet dismiss.
-class ScheduledInvoiceReadyCard extends StatelessWidget {
+/// Logs once when the instant invoice dialog is opened.
+void logInstantInvoiceOpened(ServiceRequestModel request) {
+  if (kDebugMode) {
+    print(
+      'MapRequestsScreen - instant invoice opened: ${request.id} '
+      'final=${request.finalAmount} '
+      'labor=${request.laborCharges} material=${request.materialCharges} '
+      'commission%=${request.commissionPercentage} '
+      'platformCommission=${request.platformCommission} '
+      'workerEarning=${request.workerEarning}',
+    );
+  }
+}
+
+/// Persistent prompt when a bill is ready — survives dialog dismiss and tab changes.
+class InvoiceReadyCard extends StatelessWidget {
   final ServiceRequestModel request;
   final bool isOpening;
   final VoidCallback onViewInvoice;
 
-  const ScheduledInvoiceReadyCard({
+  const InvoiceReadyCard({
     super.key,
     required this.request,
     required this.isOpening,
@@ -412,7 +367,7 @@ class ScheduledInvoiceReadyCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Your worker has submitted the bill.',
+                      'Worker has submitted the bill.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: cs.onSurface.withValues(alpha: 0.65),
                       ),
@@ -427,7 +382,7 @@ class ScheduledInvoiceReadyCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Total payable',
+                'Amount to pay',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: cs.onSurface.withValues(alpha: 0.7),
                 ),
@@ -456,7 +411,7 @@ class ScheduledInvoiceReadyCard extends StatelessWidget {
                       ),
                     )
                   : const Icon(Icons.visibility_outlined),
-              label: Text(isOpening ? 'Opening…' : 'View Invoice / Pay Bill'),
+              label: Text(isOpening ? 'Opening…' : 'View Invoice'),
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
@@ -476,21 +431,6 @@ class ScheduledInvoiceReadyCard extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// Logs once when the scheduled invoice sheet is opened.
-void logScheduledInvoiceOpened(ServiceRequestModel request) {
-  if (kDebugMode) {
-    print(
-      'Scheduled invoice opened: ${request.id} '
-      'pricing=${request.pricingType.value} '
-      'final=${request.finalAmount} '
-      'labor=${request.laborCharges} material=${request.materialCharges} '
-      'commission%=${request.commissionPercentage} '
-      'platformCommission=${request.platformCommission} '
-      'workerEarning=${request.workerEarning}',
     );
   }
 }

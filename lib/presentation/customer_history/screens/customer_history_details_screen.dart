@@ -1060,14 +1060,12 @@ class _InfoTile extends StatelessWidget {
   final String label;
   final String value;
   final ColorScheme cs;
-  final Color? valueColor;
 
   const _InfoTile({
     required this.icon,
     required this.label,
     required this.value,
     required this.cs,
-    this.valueColor,
   });
 
   @override
@@ -1101,7 +1099,6 @@ class _InfoTile extends StatelessWidget {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: valueColor ?? cs.onSurface,
               ),
             ),
           ),

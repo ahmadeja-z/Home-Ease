@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:homeease/core/utils/CallAndWhatsAppUtils.dart';
@@ -35,6 +37,9 @@ class _ScheduledHistoryDetailsScreenState
     extends State<ScheduledHistoryDetailsScreen> {
   late CustomerHistoryBloc _historyBloc;
   bool _cancelPending = false;
+  bool _invoiceSheetOpen = false;
+  bool _isOpeningInvoice = false;
+  DateTime? _lastAutoShownBillGeneratedAt;
 
   @override
   void didChangeDependencies() {
@@ -91,6 +96,22 @@ class _ScheduledHistoryDetailsScreenState
           if (!context.mounted) return;
           _showPremiumSnackBar(context, alert);
           _historyBloc.add(const ClearScheduledStatusAlert());
+        }
+
+        final request = state.selectedScheduledRequest;
+        if (request != null && request.id == widget.requestId) {
+          if (context.mounted) {
+            _maybeAutoOpenInvoice(context, request);
+          }
+        }
+
+        if (context.mounted &&
+            !state.isPayingInvoice &&
+            _invoiceSheetOpen &&
+            state.selectedScheduledRequest?.paymentStatus ==
+                PaymentStatus.paid) {
+          Navigator.of(context).maybePop();
+          _invoiceSheetOpen = false;
         }
       },
       buildWhen: (p, c) =>
@@ -200,6 +221,18 @@ class _ScheduledHistoryDetailsScreenState
                       child: ScheduledReassignedBanner(request: request),
                     ),
                   ],
+                  if (request.hasPendingInvoice) ...[
+                    _sectionGap,
+                    Padding(
+                      padding: _hPad,
+                      child: ScheduledInvoiceReadyCard(
+                        request: request,
+                        isOpening: _isOpeningInvoice,
+                        onViewInvoice: () =>
+                            _openInvoiceSheet(context, request),
+                      ),
+                    ),
+                  ],
 
                   const SizedBox(height: 20),
 
@@ -290,34 +323,22 @@ class _ScheduledHistoryDetailsScreenState
                     const SizedBox(height: 20),
                   ],
 
-                  // ── Pricing breakdown ────────────────────────────────
-                  Padding(
-                    padding: _hPad,
-                    child: _SectionLabel(
-                      icon: Icons.receipt_long_rounded,
-                      label: 'Pricing breakdown',
+                  // ── Pricing breakdown (pre-bill only) ────────────────
+                  if (request.status != RequestStatus.billGenerated) ...[
+                    Padding(
+                      padding: _hPad,
+                      child: _SectionLabel(
+                        icon: Icons.receipt_long_rounded,
+                        label: 'Pricing breakdown',
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: _hPad,
-                    child: CustomerPricingBreakdownCard(order: request),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // ── Invoice ──────────────────────────────────────────
-                  Padding(
-                    padding: _hPad,
-                    child: ScheduledRequestInvoiceCard(
-                      request: request,
-                      isPaying: state.isPayingInvoice,
-                      onConfirmPaid: () =>
-                          _confirmPayment(context, request.id),
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: _hPad,
+                      child: CustomerPricingBreakdownCard(order: request),
                     ),
-                  ),
-
-                  const SizedBox(height: 20),
+                    const SizedBox(height: 20),
+                  ],
 
                   // ── Completion images ────────────────────────────────
                   if (request.completionImages.isNotEmpty) ...[
@@ -444,6 +465,113 @@ class _ScheduledHistoryDetailsScreenState
     _historyBloc.add(
       CancelScheduledRequest(requestId: requestId, reason: reason),
     );
+  }
+
+  void _maybeAutoOpenInvoice(
+    BuildContext context,
+    ServiceRequestModel request,
+  ) {
+    if (!request.hasPendingInvoice) return;
+    final billAt = request.billGeneratedAt;
+    if (billAt == null || billAt == _lastAutoShownBillGeneratedAt) return;
+    if (_invoiceSheetOpen) return;
+
+    _lastAutoShownBillGeneratedAt = billAt;
+    logScheduledInvoiceOpened(request);
+    unawaited(_openInvoiceSheet(context, request, autoOpen: true));
+  }
+
+  Future<void> _openInvoiceSheet(
+    BuildContext context,
+    ServiceRequestModel request, {
+    bool autoOpen = false,
+  }) async {
+    if (_invoiceSheetOpen) return;
+
+    if (!autoOpen) {
+      setState(() => _isOpeningInvoice = true);
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      if (!context.mounted) return;
+      setState(() => _isOpeningInvoice = false);
+    }
+
+    if (_invoiceSheetOpen || !context.mounted) return;
+
+    _invoiceSheetOpen = true;
+    logScheduledInvoiceOpened(request);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return BlocProvider.value(
+          value: _historyBloc,
+          child: DraggableScrollableSheet(
+            initialChildSize: 0.82,
+            minChildSize: 0.45,
+            maxChildSize: 0.95,
+            builder: (_, scrollController) {
+              return Container(
+                decoration: BoxDecoration(
+                  color: Theme.of(sheetContext).colorScheme.surface,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(24),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 10),
+                    Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[400],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    Expanded(
+                      child: BlocBuilder<CustomerHistoryBloc, CustomerHistoryState>(
+                        buildWhen: (p, c) =>
+                            p.isPayingInvoice != c.isPayingInvoice ||
+                            p.selectedScheduledRequest?.paymentStatus !=
+                                c.selectedScheduledRequest?.paymentStatus ||
+                            p.selectedScheduledRequest?.finalAmount !=
+                                c.selectedScheduledRequest?.finalAmount,
+                        builder: (context, state) {
+                          final live = state.selectedScheduledRequest;
+                          final invoiceRequest =
+                              live != null && live.id == request.id
+                                  ? live
+                                  : request;
+
+                          return SingleChildScrollView(
+                            controller: scrollController,
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                            child: ScheduledRequestInvoiceCard(
+                              request: invoiceRequest,
+                              isPaying: state.isPayingInvoice,
+                              canConfirmPayment:
+                                  invoiceRequest.canCustomerConfirmPayment,
+                              onConfirmPaid: () => _confirmPayment(
+                                context,
+                                invoiceRequest.id,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+
+    _invoiceSheetOpen = false;
   }
 
   void _confirmPayment(BuildContext context, String id) {
