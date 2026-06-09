@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:homeease/core/network/network_failure.dart';
 import 'package:homeease/models/banner_model.dart';
 import 'package:homeease/models/services_category_model.dart';
 import 'package:homeease/models/services_model.dart';
@@ -12,7 +13,8 @@ class HomeRepository {
     int limit = 10,
     int offset = 0,
     String? search,
-  }) async {
+  }) {
+    return guardNetworkCall(() async {
     var query = supabaseInstance.from('servicesCategories').select();
 
     if (search != null && search.isNotEmpty) {
@@ -38,6 +40,7 @@ class HomeRepository {
     }
 
     return (categories: categories, totalCount: totalCount);
+    });
   }
 
   Future<({List<ServicesModel> services, int totalCount})> getServices({
@@ -45,7 +48,8 @@ class HomeRepository {
     int offset = 0,
     String? search,
     String? categoryId,
-  }) async {
+  }) {
+    return guardNetworkCall(() async {
     var query = supabaseInstance
         .from('services')
         .select('*, servicesCategories(name)');
@@ -78,13 +82,15 @@ class HomeRepository {
     }).toList();
 
     return (services: services, totalCount: totalCount);
+    });
   }
 
   Future<({List<BannerModel> banners, int totalCount})> getBanners({
     int limit = 10,
     int offset = 0,
     String? search,
-  }) async {
+  }) {
+    return guardNetworkCall(() async {
     try {
       var query = supabaseInstance.from('banners').select('*');
 
@@ -131,5 +137,6 @@ class HomeRepository {
     } catch (e) {
       throw Exception('Unexpected error fetching banners: $e');
     }
+    });
   }
 }

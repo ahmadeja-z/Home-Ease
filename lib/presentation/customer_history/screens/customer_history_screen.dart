@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:homeease/core/widgets/customer_offline_gate.dart';
+import 'package:homeease/core/widgets/customer_reconnect_listener.dart';
+import 'package:homeease/core/network/network_failure.dart';
 import 'package:homeease/presentation/customer_history/bloc/customer_history_bloc.dart';
 import 'package:homeease/presentation/customer_history/bloc/customer_history_event.dart';
 import 'package:homeease/presentation/customer_history/bloc/customer_history_state.dart';
@@ -110,12 +113,17 @@ class _CustomerHistoryViewState extends State<_CustomerHistoryView>
           state.drawerNavigationToken,
         );
       },
-      child: BlocConsumer<CustomerHistoryBloc, CustomerHistoryState>(
+      child: CustomerReconnectListener(
+        onReconnect: () {
+          context.read<CustomerHistoryBloc>().add(const RefreshCustomerHistory());
+        },
+        child: BlocConsumer<CustomerHistoryBloc, CustomerHistoryState>(
       listenWhen: (p, c) =>
           c.errorMessage != null && p.errorMessage != c.errorMessage,
       listener: (context, state) {
         if (state.errorMessage != null &&
-            state.status != CustomerHistoryStatus.error) {
+            state.status != CustomerHistoryStatus.error &&
+            !isNetworkFailureMessage(state.errorMessage)) {
           _showPremiumSnackBar(context, state.errorMessage!);
         }
       },
@@ -130,7 +138,13 @@ class _CustomerHistoryViewState extends State<_CustomerHistoryView>
           });
         }
 
-        return Column(
+        return CustomerOfflineGate(
+          hasCachedData: state.scheduledRequests.isNotEmpty ||
+              state.instantRequests.isNotEmpty,
+          onRetry: () => context
+              .read<CustomerHistoryBloc>()
+              .add(const RefreshCustomerHistory()),
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ── Premium Header ──────────────────────────────────────────
@@ -172,8 +186,10 @@ class _CustomerHistoryViewState extends State<_CustomerHistoryView>
               ),
             ),
           ],
+        ),
         );
       },
+      ),
       ),
     );
   }

@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:homeease/core/network/connectivity_service.dart';
+import 'package:homeease/core/network/network_failure.dart';
 import 'package:homeease/core/services/permission_service.dart';
 import 'package:homeease/models/customer_worker_offer_display.dart';
 import 'package:homeease/models/nearby_worker_model.dart';
@@ -17,6 +19,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class MapRequestsBloc
     extends Bloc<MapRequestsEvent, MapRequestsState> {
   final MapRequestsRepository repository;
+  final ConnectivityService? connectivityService;
 
   StreamSubscription<void>? _workersSubscription;
   StreamSubscription<ServiceRequestModel?>? _requestSubscription;
@@ -29,8 +32,10 @@ class MapRequestsBloc
   String? _dismissedCompletedRequestId;
   bool _isCancelling = false;
 
-  MapRequestsBloc({required this.repository})
-      : super(const MapRequestsState()) {
+  MapRequestsBloc({
+    required this.repository,
+    this.connectivityService,
+  }) : super(const MapRequestsState()) {
     on<LoadNearbyWorkersEvent>(_onLoadNearbyWorkers);
     on<ListenNearbyWorkersEvent>(_onListenNearbyWorkers);
     on<SelectWorkerEvent>(_onSelectWorker);
@@ -62,10 +67,24 @@ class MapRequestsBloc
     on<UpdateWorkerLocationBroadcastEvent>(_onUpdateWorkerLocationBroadcast);
   }
 
+  Future<bool> _isOnline() async {
+    final service = connectivityService;
+    if (service == null) return true;
+    return service.hasInternetConnection();
+  }
+
   Future<void> _onLoadNearbyWorkers(
     LoadNearbyWorkersEvent event,
     Emitter<MapRequestsState> emit,
   ) async {
+    if (!await _isOnline()) {
+      emit(state.copyWith(
+        status: MapRequestStatus.workersLoaded,
+        errorMessage: null,
+      ));
+      return;
+    }
+
     emit(state.copyWith(
       status: MapRequestStatus.loadingNearby,
       errorMessage: null,
@@ -111,11 +130,12 @@ class MapRequestsBloc
       if (kDebugMode) {
         print('MapRequestsBloc - LoadNearbyWorkersEvent failed: $e');
       }
+      final preserveCache = isNetworkError(e) && state.nearbyWorkers.isNotEmpty;
       emit(state.copyWith(
         status: MapRequestStatus.workersLoaded,
-        nearbyWorkers: [],
-        workerMarkers: {},
-        errorMessage: e.toString(),
+        nearbyWorkers: preserveCache ? state.nearbyWorkers : [],
+        workerMarkers: preserveCache ? state.workerMarkers : {},
+        errorMessage: isNetworkError(e) ? null : mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -124,6 +144,11 @@ class MapRequestsBloc
     ListenNearbyWorkersEvent event,
     Emitter<MapRequestsState> emit,
   ) async {
+    if (!await _isOnline()) {
+      emit(state.copyWith(isListening: false));
+      return;
+    }
+
     try {
       await _workersSubscription?.cancel();
 
@@ -136,9 +161,10 @@ class MapRequestsBloc
               add(LoadNearbyWorkersEvent(userLocation: location));
             },
             onError: (error) {
+              if (isNetworkError(error)) return;
               emit(state.copyWith(
                 status: MapRequestStatus.error,
-                errorMessage: error.toString(),
+                errorMessage: mapCustomerErrorMessage(error),
               ));
             },
           );
@@ -147,7 +173,7 @@ class MapRequestsBloc
     } catch (e) {
       emit(state.copyWith(
         status: MapRequestStatus.error,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -228,7 +254,7 @@ class MapRequestsBloc
     } catch (e) {
       emit(state.copyWith(
         status: MapRequestStatus.error,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -354,7 +380,7 @@ class MapRequestsBloc
         status: state.workerOffers.isNotEmpty
             ? MapRequestStatus.workerOffersReceived
             : MapRequestStatus.waitingForOffers,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -567,6 +593,9 @@ class MapRequestsBloc
   }
 
   String _paymentErrorMessage(Object error) {
+    if (isNetworkError(error)) {
+      return const NetworkFailure().message;
+    }
     final message = error.toString();
     if (message.contains('invalid_request_for_payment')) {
       return 'This invoice cannot be marked as paid. Refresh and try again.';
@@ -640,7 +669,7 @@ class MapRequestsBloc
     } catch (e) {
       emit(state.copyWith(
         status: MapRequestStatus.paymentError,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -1041,7 +1070,7 @@ class MapRequestsBloc
       }
       emit(state.copyWith(
         status: MapRequestStatus.error,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }

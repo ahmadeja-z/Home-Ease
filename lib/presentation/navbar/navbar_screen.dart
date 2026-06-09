@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:homeease/core/assets/app_images.dart';
+import 'package:homeease/core/widgets/customer_connectivity_shell.dart';
 import 'package:homeease/presentation/customer_drawer/bloc/customer_drawer_bloc.dart';
 import 'package:homeease/presentation/customer_drawer/bloc/customer_drawer_event.dart';
 import 'package:homeease/presentation/customer_drawer/customer_app_drawer.dart';
@@ -121,7 +122,9 @@ class NavbarView extends StatelessWidget {
             },
             child: KeyedSubtree(
               key: ValueKey(state.selectedIndex),
-              child: screens[state.selectedIndex],
+              child: CustomerConnectivityShell(
+                child: screens[state.selectedIndex],
+              ),
             ),
           );
         },

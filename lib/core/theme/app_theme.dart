@@ -14,8 +14,8 @@ class AppTheme {
   static const Color secondColor = Color(0xFF14B8A6); // Calm Teal
   static const Color secondDarkColor = Color(0xFF0F766E); // Dark Teal
 
-  static const Color accentColor = Color(0xFFF59E0B); // Action Orange
-  static const Color accentDarkColor = Color(0xFFD97706); // Dark Orange
+static const Color accentColor = Color(0xFF2563EB); // Professional Action Blue
+static const Color accentDarkColor = Color(0xFF1D4ED8); // Dark Action Blue
 
   static const Color scaffoldColor = Color(0xFFF5F7FA); // Clean Light Grey
   static const Color scaffoldDarkColor = Color(0xFF1F2937); // Dark Grey
@@ -31,7 +31,8 @@ class AppTheme {
   static const Color successColor = Color(0xFF16A34A);
   static const Color warningColor = Color(0xFFF59E0B);
 
-  static const rattingYellow = Color(0xFFFFC107);
+
+static const rattingYellow = Color(0xFF14B8A6); // Theme Teal instead of Yellow
   static const Color redColor = Colors.red;
 
   static ThemeData get lightTheme {
@@ -53,7 +54,7 @@ class AppTheme {
         onSurface: textPrimaryLight,
         error: errorColor,
         onTertiary: redColor,
-        onSurfaceVariant: rattingYellow,
+   onSurfaceVariant: secondColor,
       ),
       textTheme: TextTheme(
         displayLarge: TextStyle(
@@ -136,7 +137,7 @@ class AppTheme {
         onSurface: textPrimaryDark,
         outline: Color(0xFF374151),
         onTertiary: redColor,
-        onSurfaceVariant: rattingYellow,
+    onSurfaceVariant: secondDarkColor,
 
         error: errorColor,
       ),

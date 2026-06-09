@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:homeease/core/network/network_failure.dart';
 import 'package:homeease/core/services/geocoding_service.dart';
 import 'package:homeease/models/services_model.dart';
 import 'package:homeease/presentation/scheduled_booking/bloc/scheduled_booking_event.dart';
@@ -108,9 +109,9 @@ class ScheduledBookingBloc
     } catch (e) {
       emit(state.copyWith(
         locationLoading: false,
-        locationError: e.toString(),
+        locationError: mapCustomerErrorMessage(e),
         status: ScheduledBookingUiStatus.formReady,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -257,7 +258,7 @@ class ScheduledBookingBloc
         } catch (e) {
           emit(state.copyWith(
             status: ScheduledBookingUiStatus.submitError,
-            errorMessage: e.toString(),
+            errorMessage: mapCustomerErrorMessage(e),
           ));
           return;
         }
@@ -290,7 +291,7 @@ class ScheduledBookingBloc
     } catch (e) {
       emit(state.copyWith(
         status: ScheduledBookingUiStatus.submitError,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -316,7 +317,7 @@ class ScheduledBookingBloc
     } catch (e) {
       emit(state.copyWith(
         status: ScheduledBookingUiStatus.detailsError,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -394,7 +395,7 @@ class ScheduledBookingBloc
       emit(state.copyWith(
         status: ScheduledBookingUiStatus.payError,
         booking: booking,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }

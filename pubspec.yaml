@@ -65,6 +65,9 @@ dependencies:
   carousel_slider: ^5.1.2
   flutter_spinkit: ^5.2.2
   photo_view: ^0.15.0
+  flutter_launcher_icons: ^0.14.2
+
+
 
 dev_dependencies:
   flutter_test:
@@ -153,3 +156,10 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/homeease_app_icon.png"
+  adaptive_icon_background: "#2f3d44"
+  adaptive_icon_foreground: "assets/images/homeease_app_icon.png"
+  remove_alpha_ios: true

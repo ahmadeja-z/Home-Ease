@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:homeease/core/network/network_failure.dart';
+import 'package:homeease/core/widgets/no_internet_widget.dart';
 import 'package:homeease/presentation/customer_history/bloc/customer_history_bloc.dart';
 import 'package:homeease/presentation/customer_history/bloc/customer_history_event.dart';
 import 'package:homeease/presentation/customer_history/bloc/customer_history_state.dart';
@@ -49,6 +51,13 @@ class _InstantOrdersHistoryTabState extends State<InstantOrdersHistoryTab> {
         }
         if (state.status == CustomerHistoryStatus.error &&
             state.instantRequests.isEmpty) {
+          if (isNetworkFailureMessage(state.errorMessage)) {
+            return NoInternetWidget(
+              onRetry: () => context
+                  .read<CustomerHistoryBloc>()
+                  .add(const LoadInstantHistory()),
+            );
+          }
           return CustomerHistoryErrorState(
             message: state.errorMessage ?? 'Something went wrong',
             onRetry: () => context

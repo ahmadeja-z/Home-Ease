@@ -1,4 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:homeease/core/network/network_failure.dart';
 import 'package:homeease/presentation/home/bloc/home_event.dart';
 import 'package:homeease/presentation/home/bloc/home_state.dart';
 import 'package:homeease/repositories/home_repository.dart';
@@ -52,7 +53,7 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
       emit(
         state.copyWith(
           fetchBannerStatus: FetchBannerStatus.failure,
-          fetchBannerErrorMessage: e.toString(),
+          fetchBannerErrorMessage: mapCustomerErrorMessage(e),
         ),
       );
     }
@@ -97,7 +98,7 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
       emit(
         state.copyWith(
           fetchServicesCategoriesStatus: FetchServicesCategoriesStatus.failure,
-          fetchServicesCategoriesErrorMessage: e.toString(),
+          fetchServicesCategoriesErrorMessage: mapCustomerErrorMessage(e),
         ),
       );
     }
@@ -146,7 +147,7 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
       emit(
         state.copyWith(
           fetchServicesStatus: FetchServicesStatus.failure,
-          fetchAllServicesErrorMessage: e.toString(),
+          fetchAllServicesErrorMessage: mapCustomerErrorMessage(e),
         ),
       );
     }

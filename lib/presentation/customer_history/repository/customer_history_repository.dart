@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:homeease/core/network/network_failure.dart';
 import 'package:homeease/models/service_request_model.dart';
 import 'package:homeease/presentation/customer_history/models/customer_history_model.dart';
 import 'package:homeease/presentation/customer_history/utils/scheduled_request_helpers.dart';
@@ -88,7 +89,8 @@ class CustomerHistoryRepository {
     DateTime? dateTo,
     String? categoryId,
     CustomerHistorySort sort = CustomerHistorySort.newest,
-  }) async {
+  }) {
+    return guardNetworkCall(() async {
     try {
       dynamic query = supabase
           .from('service_requests')
@@ -128,6 +130,7 @@ class CustomerHistoryRepository {
       }
       rethrow;
     }
+    });
   }
 
   Future<ServiceRequestModel> fetchScheduledHistoryDetails(
@@ -173,7 +176,8 @@ class CustomerHistoryRepository {
     double? minPrice,
     double? maxPrice,
     CustomerHistorySort sort = CustomerHistorySort.newest,
-  }) async {
+  }) {
+    return guardNetworkCall(() async {
     try {
       dynamic query = supabase
           .from('service_requests')
@@ -213,6 +217,7 @@ class CustomerHistoryRepository {
       }
       rethrow;
     }
+    });
   }
 
   /// @deprecated Use [fetchInstantHistory].
@@ -270,7 +275,8 @@ class CustomerHistoryRepository {
 
   Future<CustomerHistorySummary> fetchCustomerHistorySummary(
     String customerId,
-  ) async {
+  ) {
+    return guardNetworkCall(() async {
     try {
       final rows = await supabase
           .from('service_requests')
@@ -325,6 +331,7 @@ class CustomerHistoryRepository {
       }
       rethrow;
     }
+    });
   }
 
   /// Alias for scheduled details screen.

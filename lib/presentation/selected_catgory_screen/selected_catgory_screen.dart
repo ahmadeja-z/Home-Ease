@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:homeease/core/network/network_failure.dart';
+import 'package:homeease/core/widgets/customer_screen_shell.dart';
+import 'package:homeease/core/widgets/customer_offline_gate.dart';
+import 'package:homeease/core/widgets/customer_reconnect_listener.dart';
 import 'package:homeease/models/services_category_model.dart';
 import 'package:homeease/models/services_model.dart';
+import 'package:homeease/core/widgets/no_internet_widget.dart';
 import 'package:homeease/presentation/home/services_details_screen.dart';
 import 'package:homeease/presentation/selected_catgory_screen/bloc/selected_category_bloc.dart';
 import 'package:homeease/presentation/selected_catgory_screen/bloc/selected_category_event.dart';
@@ -19,15 +24,33 @@ class SelectedCategoryScreen extends StatelessWidget {
       create: (context) => SelectedCategoryBloc(
         repository: SelectedCategoryRepository(),
       )..add(FetchCategoryEvent(category.id)),
-      child: Scaffold(
+      child: CustomerScreenShell(
         appBar: CustomAppBar(title: category.name),
-        body: Column(
-          children: [
-            _CategoryHeader(category: category),
-            Expanded(
-              child: _ServicesGrid(),
-            ),
-          ],
+        body: CustomerReconnectListener(
+          onReconnect: () {
+            context.read<SelectedCategoryBloc>().add(
+                  FetchCategoryEvent(category.id),
+                );
+          },
+          child: BlocBuilder<SelectedCategoryBloc, SelectedCategoryState>(
+            builder: (context, state) {
+              final hasCachedData =
+                  (state.categoryServices?.isNotEmpty ?? false);
+
+              return CustomerOfflineGate(
+                hasCachedData: hasCachedData,
+                onRetry: () => context.read<SelectedCategoryBloc>().add(
+                      FetchCategoryEvent(category.id),
+                    ),
+                child: Column(
+                  children: [
+                    _CategoryHeader(category: category),
+                    Expanded(child: _ServicesGrid(categoryId: category.id)),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -97,6 +120,10 @@ class _CategoryHeader extends StatelessWidget {
 }
 
 class _ServicesGrid extends StatelessWidget {
+  final String? categoryId;
+
+  const _ServicesGrid({this.categoryId});
+
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<SelectedCategoryBloc, SelectedCategoryState>(
@@ -106,6 +133,17 @@ class _ServicesGrid extends StatelessWidget {
         }
 
         if (state.status == FetchCategoryStatus.failure) {
+          if (isNetworkFailureMessage(state.errorMessage)) {
+            return NoInternetWidget(
+              onRetry: () {
+                if (categoryId != null) {
+                  context.read<SelectedCategoryBloc>().add(
+                        FetchCategoryEvent(categoryId!),
+                      );
+                }
+              },
+            );
+          }
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,

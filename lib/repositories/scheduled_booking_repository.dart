@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:homeease/core/network/network_failure.dart';
 import 'package:homeease/core/services/permission_service.dart';
 import 'package:homeease/models/service_request_model.dart';
 import 'package:homeease/models/services_model.dart';
@@ -111,7 +112,8 @@ class ScheduledBookingRepository {
     required String customerAddress,
     required String description,
     List<String> customerRequestImages = const [],
-  }) async {
+  }) {
+    return guardNetworkCall(() async {
     final userId = supabase.auth.currentUser?.id;
     if (userId == null) {
       throw Exception('Please sign in to book a service.');
@@ -201,6 +203,7 @@ class ScheduledBookingRepository {
       }
       throw Exception(e.message);
     }
+    });
   }
 
   /// Inserts in-app notifications for every active admin after a scheduled request

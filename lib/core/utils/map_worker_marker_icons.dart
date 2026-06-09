@@ -30,6 +30,7 @@ class MapWorkerMarkerIcons {
     required Color fillColor,
   }) async {
     try {
+      await DefaultAssetBundle.of(context).load(assetPath);
       return await BitmapDescriptor.asset(
         createLocalImageConfiguration(context, size: const Size(48, 48)),
         assetPath,

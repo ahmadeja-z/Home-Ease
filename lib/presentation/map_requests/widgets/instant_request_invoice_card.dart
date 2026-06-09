@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:homeease/core/widgets/customer_offline_gate.dart';
 import 'package:homeease/core/utils/currency_icon.dart';
 import 'package:homeease/models/service_request_model.dart';
 import 'package:homeease/widgets/app_cache_image.dart';
@@ -190,10 +191,20 @@ class InstantRequestInvoiceCard extends StatelessWidget {
           ],
           if (canConfirmPayment) ...[
             const SizedBox(height: 16),
+            if (isCustomerOffline(context))
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Please connect to internet to update payment status.',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: isPaying ? null : onConfirmPaid,
+                onPressed: isPaying || isCustomerOffline(context)
+                    ? null
+                    : onConfirmPaid,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
@@ -320,14 +331,7 @@ class InvoiceReadyCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            cs.primaryContainer.withValues(alpha: 0.55),
-            cs.surfaceContainerHighest.withValues(alpha: 0.9),
-          ],
-        ),
+        color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.7),
         border: Border.all(color: cs.primary.withValues(alpha: 0.25)),
         boxShadow: [
           BoxShadow(

@@ -7,6 +7,7 @@ import 'package:homeease/models/nearby_worker_model.dart';
 import 'package:homeease/models/request_worker_offer_model.dart';
 import 'package:homeease/models/service_request_model.dart';
 import 'package:homeease/models/worker_profile_model.dart';
+import 'package:homeease/core/network/network_failure.dart';
 import 'package:homeease/core/services/permission_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -76,7 +77,8 @@ class MapRequestsRepository {
   Future<List<NearbyWorkerModel>> fetchNearbyWorkers({
     required LatLng userLocation,
     double radius = 10.0,
-  }) async {
+  }) {
+    return guardNetworkCall(() async {
     if (kDebugMode) {
       print('MapRequestsRepository - fetchNearbyWorkers (no category)');
       print(
@@ -115,6 +117,7 @@ class MapRequestsRepository {
       }
       rethrow;
     }
+    });
   }
 
   /// Category-filtered workers — use when sending instant request offers only.
@@ -416,7 +419,7 @@ class MapRequestsRepository {
     required String requestId,
   }) async {
     try {
-      final data = await supabase.rpc(
+      await supabase.rpc(
         'customer_accept_worker_offer',
         params: {
           'p_offer_id': offerId,
@@ -429,7 +432,8 @@ class MapRequestsRepository {
         print('MapRequestsRepository - service request accepted: $requestId');
       }
 
-      return _mapRequestRow(data as Map<String, dynamic>);
+      // RPC composite rows can omit/null fields REST selects include; re-fetch.
+      return fetchRequestById(requestId);
     } on PostgrestException catch (e) {
       if (kDebugMode) {
         print('PostgrestException acceptWorkerOffer: ${e.message}');
@@ -445,13 +449,14 @@ class MapRequestsRepository {
   }
 
   /// Customer confirms direct payment to worker (outside app gateway).
-  Future<ServiceRequestModel> payInvoice(String requestId) async {
+  Future<ServiceRequestModel> payInvoice(String requestId) {
+    return guardNetworkCall(() async {
     if (kDebugMode) {
       print('MapRequestsRepository - customer_pay_invoice RPC called: $requestId');
     }
 
     try {
-      final data = await supabase.rpc(
+      await supabase.rpc(
         'customer_pay_invoice',
         params: {'p_request_id': requestId},
       );
@@ -460,13 +465,16 @@ class MapRequestsRepository {
         print('MapRequestsRepository - payment success: $requestId');
       }
 
-      return _mapRequestRow(data as Map<String, dynamic>);
+      // RPC returns a composite row that can differ from REST selects; re-fetch
+      // with worker enrichment using the same path as invoice/history screens.
+      return fetchRequestById(requestId);
     } on PostgrestException catch (e) {
       if (kDebugMode) {
         print('MapRequestsRepository - payment failed: $requestId — ${e.message}');
       }
       rethrow;
     }
+    });
   }
 
   /// @deprecated Use [createInstantRequest].

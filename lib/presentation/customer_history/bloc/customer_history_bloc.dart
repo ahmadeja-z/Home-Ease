@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:homeease/core/network/network_failure.dart';
 import 'package:homeease/core/services/local_notification_service.dart';
 import 'package:homeease/models/service_request_model.dart';
 import 'package:homeease/presentation/customer_history/bloc/customer_history_event.dart';
@@ -106,10 +107,19 @@ class CustomerHistoryBloc
         instantHasMore: instant.length >= CustomerHistoryState.pageSize,
       ));
     } catch (e) {
-      emit(state.copyWith(
-        status: CustomerHistoryStatus.error,
-        errorMessage: e.toString(),
-      ));
+      final hasCache =
+          state.scheduledRequests.isNotEmpty || state.instantRequests.isNotEmpty;
+      if (isNetworkError(e) && hasCache) {
+        emit(state.copyWith(
+          status: CustomerHistoryStatus.loaded,
+          clearError: true,
+        ));
+      } else {
+        emit(state.copyWith(
+          status: CustomerHistoryStatus.error,
+          errorMessage: mapCustomerErrorMessage(e),
+        ));
+      }
     }
   }
 
@@ -140,10 +150,18 @@ class CustomerHistoryBloc
         scheduledHasMore: scheduled.length >= CustomerHistoryState.pageSize,
       ));
     } catch (e) {
-      emit(state.copyWith(
-        status: CustomerHistoryStatus.error,
-        errorMessage: e.toString(),
-      ));
+      final hasCache = state.scheduledRequests.isNotEmpty;
+      if (isNetworkError(e) && hasCache) {
+        emit(state.copyWith(
+          status: CustomerHistoryStatus.loaded,
+          clearError: true,
+        ));
+      } else {
+        emit(state.copyWith(
+          status: CustomerHistoryStatus.error,
+          errorMessage: mapCustomerErrorMessage(e),
+        ));
+      }
     }
   }
 
@@ -174,10 +192,18 @@ class CustomerHistoryBloc
         instantHasMore: instant.length >= CustomerHistoryState.pageSize,
       ));
     } catch (e) {
-      emit(state.copyWith(
-        status: CustomerHistoryStatus.error,
-        errorMessage: e.toString(),
-      ));
+      final hasCache = state.instantRequests.isNotEmpty;
+      if (isNetworkError(e) && hasCache) {
+        emit(state.copyWith(
+          status: CustomerHistoryStatus.loaded,
+          clearError: true,
+        ));
+      } else {
+        emit(state.copyWith(
+          status: CustomerHistoryStatus.error,
+          errorMessage: mapCustomerErrorMessage(e),
+        ));
+      }
     }
   }
 
@@ -213,7 +239,7 @@ class CustomerHistoryBloc
     } catch (e) {
       emit(state.copyWith(
         isScheduledLoadingMore: false,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -254,7 +280,7 @@ class CustomerHistoryBloc
       emit(state.copyWith(
         status: CustomerHistoryStatus.loaded,
         isLoadingMore: false,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -428,7 +454,7 @@ class CustomerHistoryBloc
     } catch (e) {
       emit(state.copyWith(
         status: CustomerHistoryStatus.error,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -478,7 +504,7 @@ class CustomerHistoryBloc
       emit(state.copyWith(
         status: CustomerHistoryStatus.error,
         clearSelectedScheduled: true,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -522,7 +548,7 @@ class CustomerHistoryBloc
     } catch (e) {
       emit(state.copyWith(
         isCancellingScheduled: false,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -635,7 +661,7 @@ class CustomerHistoryBloc
     } catch (e) {
       emit(state.copyWith(
         isPayingInvoice: false,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }
@@ -680,7 +706,7 @@ class CustomerHistoryBloc
     } catch (e) {
       emit(state.copyWith(
         status: CustomerHistoryStatus.detailsLoaded,
-        errorMessage: e.toString(),
+        errorMessage: mapCustomerErrorMessage(e),
       ));
     }
   }

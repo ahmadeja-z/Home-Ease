@@ -1,4 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:homeease/core/network/network_failure.dart';
 import 'package:homeease/presentation/selected_catgory_screen/bloc/selected_category_event.dart';
 import 'package:homeease/presentation/selected_catgory_screen/bloc/selected_category_state.dart';
 import 'package:homeease/repositories/selected_category_repository.dart';
@@ -37,7 +38,7 @@ class SelectedCategoryBloc
       emit(
         state.copyWith(
           status: FetchCategoryStatus.failure,
-          errorMessage: e.toString(),
+          errorMessage: mapCustomerErrorMessage(e),
         ),
       );
     }

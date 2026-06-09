@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:homeease/core/widgets/customer_offline_gate.dart';
 import 'package:homeease/core/utils/currency_icon.dart';
 import 'package:homeease/models/service_request_model.dart';
 import 'package:homeease/widgets/app_cache_image.dart';
@@ -196,10 +197,20 @@ class ScheduledRequestInvoiceCard extends StatelessWidget {
           ],
           if (canConfirmPayment) ...[
             const SizedBox(height: 16),
+            if (isCustomerOffline(context))
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Please connect to internet to update payment status.',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: isPaying ? null : onConfirmPaid,
+                onPressed: isPaying || isCustomerOffline(context)
+                    ? null
+                    : onConfirmPaid,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green,
                   foregroundColor: Colors.white,

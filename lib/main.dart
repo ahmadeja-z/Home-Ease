@@ -10,6 +10,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 
 import 'core/services/notification_service.dart';
+import 'core/network/connectivity_bloc.dart';
+import 'core/network/connectivity_event.dart';
+import 'core/network/connectivity_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_bloc/theme_bloc.dart';
 import 'core/theme/theme_bloc/theme_event.dart';
@@ -83,6 +86,9 @@ void main() async {
             RepositoryProvider<HomeRepository>(
               create: (_) => HomeRepository(),
             ),
+            RepositoryProvider<ConnectivityService>(
+              create: (_) => ConnectivityService(),
+            ),
           ],
           child: MultiBlocProvider(
             providers: [
@@ -102,6 +108,11 @@ void main() async {
               BlocProvider<ProfileBloc>(
                 create: (context) =>
                     ProfileBloc(userRepository: context.read<UserRepository>()),
+              ),
+              BlocProvider<ConnectivityBloc>(
+                create: (context) => ConnectivityBloc(
+                  service: context.read<ConnectivityService>(),
+                )..add(const ConnectivityStarted()),
               ),
               // BlocProvider<DrawerBloc>(create: (context) => DrawerBloc()),
             ],

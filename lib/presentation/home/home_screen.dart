@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:homeease/core/network/network_failure.dart';
+import 'package:homeease/core/widgets/customer_offline_gate.dart';
+import 'package:homeease/core/widgets/customer_reconnect_listener.dart';
 
 import 'package:homeease/presentation/home/bloc/home_bloc.dart';
 import 'package:homeease/presentation/home/bloc/home_event.dart';
@@ -53,35 +56,44 @@ class _HomeScreenState extends State<HomeScreen> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      body: SafeArea(
-        child: CustomScrollView(
-          slivers: [
-            // Content
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Banners Section
-                    _buildBannersSection(theme),
-                    const SizedBox(height: 24),
+    return CustomerReconnectListener(
+      onReconnect: _fetchInitialData,
+      child: BlocBuilder<HomeBloc, HomeState>(
+        builder: (context, state) {
+          final hasCachedData = state.banners.isNotEmpty ||
+              state.serviceCategories.isNotEmpty ||
+              state.services.isNotEmpty;
 
-                    // Categories Section
-                    _buildCategoriesSection(theme, isDark),
-                    const SizedBox(height: 24),
-
-                    // Services Section
-                    _buildServicesSection(theme, isDark),
-                    const SizedBox(height: 24),
+          return CustomerOfflineGate(
+            hasCachedData: hasCachedData,
+            onRetry: _fetchInitialData,
+            child: Scaffold(
+              backgroundColor: theme.scaffoldBackgroundColor,
+              body: SafeArea(
+                child: CustomScrollView(
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildBannersSection(theme),
+                            const SizedBox(height: 24),
+                            _buildCategoriesSection(theme, isDark),
+                            const SizedBox(height: 24),
+                            _buildServicesSection(theme, isDark),
+                            const SizedBox(height: 24),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -109,6 +121,9 @@ class _HomeScreenState extends State<HomeScreen> {
             }
 
             if (state.fetchBannerStatus == FetchBannerStatus.failure) {
+              if (isNetworkFailureMessage(state.fetchBannerErrorMessage)) {
+                return const SizedBox.shrink();
+              }
               return Container(
                 height: 200,
                 decoration: BoxDecoration(
@@ -203,6 +218,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
             if (state.fetchServicesCategoriesStatus ==
                 FetchServicesCategoriesStatus.failure) {
+              if (isNetworkFailureMessage(
+                state.fetchServicesCategoriesErrorMessage,
+              )) {
+                return const SizedBox.shrink();
+              }
               return Container(
                 height: 100,
                 decoration: BoxDecoration(
@@ -370,6 +390,9 @@ class _HomeScreenState extends State<HomeScreen> {
             }
 
             if (state.fetchServicesStatus == FetchServicesStatus.failure) {
+              if (isNetworkFailureMessage(state.fetchAllServicesErrorMessage)) {
+                return const SizedBox.shrink();
+              }
               return Container(
                 padding: const EdgeInsets.all(32),
                 decoration: BoxDecoration(
